@@ -114,11 +114,17 @@ ai/AiScoringProvider ◀── Mock…   data/repository.ts ──▶ Supabase (
   noms. Aucune politique `delete` sur `ideas`. Le navigateur ne reçoit que l'URL et la clé
   **publique** (publishable, ou anon en compatibilité) ; l'application refuse de démarrer si on
   lui donne une clé secrète.
-- **IA.** L'interface `AiScoringProvider` isole le fournisseur. `MockAiScoringProvider` applique
-  des règles lisibles et déterministes (budget → faisabilité, thème → alignement, mots-clés →
-  impact et innovation) et signale les informations manquantes. Elle se présente partout comme
-  une simulation. Un vrai modèle se branchera via une fonction serveur détenant la clé
-  (voir `src/ai/config.ts`), jamais côté navigateur.
+- **IA.** L'interface `AiScoringProvider` isole le fournisseur, choisi par `VITE_AI_PROVIDER` :
+  - `mock` (défaut, V1) : `MockAiScoringProvider` applique des règles lisibles et déterministes
+    (budget → faisabilité, thème → alignement, mots-clés → impact et innovation), signale les
+    informations manquantes et se présente partout comme une simulation ;
+  - `http` (prêt, inactif) : `HttpAiScoringProvider` appelle la fonction Vercel `api/score.ts`.
+    Celle-ci vérifie la session Supabase **et** l'appartenance à l'équipe, valide l'idée, puis
+    appelle Claude (`claude-opus-5-5` par défaut, SDK officiel, sortie JSON imposée par un schéma
+    Zod, repli automatique de l'API si le modèle décline). La clé `ANTHROPIC_API_KEY` ne vit que
+    sur le serveur ; sans elle, la route répond 503 et l'interface l'explique.
+  Seul le contenu de l'idée est envoyé au modèle, **jamais le nom de son auteur**. Les notes du
+  modèle restent des propositions : même séparation, même validation 1–5 que pour la simulation.
 - **Doublons.** Normalisation (accents, casse, ponctuation), mots vides, synonymes courants
   (chatbot → assistant…), racine naïve, puis similarité de Jaccard sur le texte complet
   (seuil 0,16) et sur le titre (seuil 0,5). Titre identique = 100 %. Seuils réglés sur
@@ -172,9 +178,9 @@ données, l'autre ne tolérait pas l'alignement des espaces dans le SQL).
 
 ## 4. Fiabilisation
 
-79 tests Vitest (`tests/`), centrés sur ce qui fausserait le travail de Camille. Ils tournent
-**sans Supabase** : la logique métier est pure, et seules les conversions et la configuration
-touchent à la couche données.
+103 tests Vitest (`tests/`), centrés sur ce qui fausserait le travail de Camille. Ils tournent
+**sans Supabase ni réseau** : la logique métier est pure, la couche données est testée par ses
+conversions, et la fonction serveur IA par injection de dépendances.
 
 - **Import :** 40 idées, identifiants IDEA-001 à 040 conservés, séparateur `;` et BOM,
   champs vides → `null`, date au format français, champs entre guillemets, fichier invalide
@@ -193,7 +199,13 @@ touchent à la couche données.
   idempotent (fichier importé deux fois = 40 lignes), refus d'une note hors 1–5 lue en base,
   clé publishable / anon acceptée et **clé secrète refusée**, contrôle statique de la migration
   (RLS sur chaque table, rien pour `anon`, contraintes 1–5, pas de suppression d'idée).
-- **Filtres :** recherche sans accents, filtre « non renseigné », statut, tris.
+- **Filtres et pagination :** recherche sans accents, filtre « non renseigné », statut, doublons,
+  tris ; 15 idées par page, page hors bornes corrigée.
+- **IA réelle (préparée) :** aucun nom d'auteur envoyé au modèle, idée trop longue refusée (pas
+  tronquée), note hors 1–5 du modèle refusée, schéma de sortie, route serveur : 503 sans clé
+  (modèle jamais appelé), 401 sans session, 403 hors équipe, 502 sans fuite du détail d'erreur ;
+  côté navigateur : jeton envoyé, erreurs traduites, réponse revalidée.
+  La route a aussi été compilée et exécutée en ESM Node comme sur Vercel : 503 `not_configured`.
 
 **CI** (`.github/workflows/ci.yml`) : à chaque push et pull request, `npm ci`, vérification
 TypeScript, tests, build de production.
@@ -215,6 +227,16 @@ ni test d'intégration contre une vraie base.
 - Données personnelles : noms des porteurs visibles et exportés uniquement par les comptes
   autorisés ; le fichier source n'est pas servi par l'application ; page marquée `noindex`.
   Les identifiants du compte démonstrateur sont transmis séparément, jamais dans le dépôt.
+
+**Activer un vrai modèle plus tard** (aucun code à écrire) :
+
+1. Vercel > Environment Variables : `ANTHROPIC_API_KEY` (sans préfixe `VITE_`), optionnellement
+   `AI_MODEL` (défaut `claude-opus-5-5`).
+2. Passer `VITE_AI_PROVIDER` à `http`, puis redéployer.
+3. Tester « Proposer une note IA » sur une idée : la note affichée est marquée « modèle de langage ».
+
+Point d'attention : l'envoi du contenu des idées à un fournisseur externe est à valider avec le
+client (données internes Hexavia), même sans les noms des auteurs.
 
 **Ce qui manque avant de confier l'outil à Camille :**
 
@@ -249,8 +271,8 @@ Heures réelles (heure locale, 12/11/2026, d'après l'historique Git) :
 
 **Avec une journée de plus :**
 
-- Vrai modèle via une fonction serveur, avec un prompt qui reprend la grille du client et
-  fait citer le passage de l'idée qui justifie chaque note.
+- Brancher la clé du modèle et construire un petit jeu d'évaluation (idées notées par Camille)
+  pour comparer simulation et modèle avant de s'y fier ; limiter le débit de `/api/score`.
 - Notes par évaluateur (une ligne par personne) et vue de consolidation ; rôle « lecture
   seule » pour le client.
 - Test d'intégration de la RLS contre une base Supabase locale (`supabase start`).

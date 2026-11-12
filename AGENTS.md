@@ -69,6 +69,20 @@ Avant tout commit : `npm run typecheck && npm test && npm run build` doivent pas
   Le test `tests/supabase-data.test.ts` vérifie ces règles statiquement sur les migrations.
 - Ajouter un utilisateur = le créer dans Authentication **puis** l'insérer dans `team_members`.
 
+## IA (fournisseur de notation)
+
+- `VITE_AI_PROVIDER=mock` (défaut) : simulation. `http` : `HttpAiScoringProvider` → `api/score.ts`.
+- `api/score.ts` (route Vercel) ne fait que câbler ; la logique est dans `server/scoreHandler.ts`
+  (dépendances injectées, testée sans réseau). L'appel au modèle est dans `server/anthropicScorer.ts`
+  (SDK `@anthropic-ai/sdk`, `client.beta.messages.parse` + schéma Zod, `fallbacks: 'default'`).
+- Le contrat partagé navigateur ↔ serveur est `src/ai/scoringPrompt.ts` : ne jamais y ajouter
+  le nom de l'auteur ; toute note du modèle hors 1–5 est refusée, jamais corrigée.
+- `api/`, `server/` et les modules de `src/` qu'ils importent sont exécutés en **ESM Node sans
+  bundler** : imports relatifs avec l'extension `.js`, aucun import de React, Vite ou `window`.
+  Vérification : `npx tsc api/score.ts --ignoreConfig --module nodenext --moduleResolution nodenext
+  --outDir <tmp>` puis exécuter la route avec Node (sans clé : 503 attendu).
+- `@anthropic-ai/sdk` et `zod` ne doivent jamais être importés par le code du navigateur.
+
 ## Sécurité et données
 
 - Aucun secret dans le dépôt. `.env.example` ne contient **que des valeurs factices** ;
@@ -78,7 +92,7 @@ Avant tout commit : `npm run typecheck && npm test && npm run build` doivent pas
   (l'application refuse d'ailleurs de démarrer avec).
 - Le CSV (noms d'auteurs) n'est jamais servi publiquement (pas dans `public/`) : il est importé
   depuis l'application par un membre connecté.
-- Aucune clé de modèle IA préfixée `VITE_` : un vrai fournisseur passera par une fonction serveur.
+- Aucune clé de modèle IA préfixée `VITE_` : `ANTHROPIC_API_KEY` est une variable serveur Vercel.
 - Ne pas envoyer les données (noms d'auteurs) à un service tiers autre que la base Supabase du projet.
 
 ## Pièges déjà rencontrés (à ne pas reproduire)
