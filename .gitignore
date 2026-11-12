@@ -1,0 +1,14 @@
+node_modules
+dist
+*.local
+.env
+.env.*
+!.env.example
+.vercel
+coverage
+.DS_Store
+*.tsbuildinfo
+
+# Documents reçus : le brief INSKIP n'est pas republié ; le CSV est versionné dans public/data (copie à l'identique)
+/Cas pratique*.pdf
+/idees_hexavia.csv
