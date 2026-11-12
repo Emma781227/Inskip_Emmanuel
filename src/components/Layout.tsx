@@ -1,4 +1,4 @@
-import { Lightbulb, ListChecks, LayoutDashboard } from 'lucide-react';
+import { CheckCircle2, Lightbulb, ListChecks, LayoutDashboard, Loader2, LogOut } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAppStore } from '../state/AppStore';
 import { ToastView } from './ui';
@@ -24,7 +24,8 @@ function NavItem({ to, label, icon: Icon, badge }: { to: string; label: string; 
 }
 
 export function Layout() {
-  const { workspace, dataset, persistent, toasts, dismissToast } = useAppStore();
+  const { workspace, auth, signOut, savingCount, toasts, dismissToast } = useAppStore();
+  const email = auth.status === 'signed-in' ? auth.email : '';
   const shortlistCount = Object.keys(workspace.shortlist).length;
 
   return (
@@ -37,13 +38,33 @@ export function Layout() {
             </span>
             <span className="leading-tight">
               <span className="block text-sm font-semibold">IdeaPilot</span>
-              <span className="block max-w-[14rem] truncate text-xs text-slate-400">{dataset.name}</span>
+              <span className="block max-w-[14rem] truncate text-xs text-slate-400">Challenge innovation Hexavia</span>
             </span>
           </NavLink>
           <nav className="flex items-center gap-1" aria-label="Navigation principale">
             <NavItem to="/" label="Idées" icon={LayoutDashboard} />
             <NavItem to="/shortlist" label="Shortlist" icon={ListChecks} badge={shortlistCount} />
           </nav>
+          <div className="ml-auto flex items-center gap-3 text-xs text-slate-300">
+            <span className="flex items-center gap-1.5" role="status" aria-live="polite">
+              {savingCount > 0 ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                  Enregistrement…
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="size-3.5 text-emerald-400" aria-hidden />
+                  <span className="hidden sm:inline">Tout est enregistré</span>
+                </>
+              )}
+            </span>
+            <span className="hidden max-w-[12rem] truncate md:inline" title={email}>{email}</span>
+            <button type="button" onClick={signOut} className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-white/10 hover:text-white" title="Se déconnecter">
+              <LogOut className="size-3.5" aria-hidden />
+              <span className="sr-only sm:not-sr-only">Déconnexion</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -53,9 +74,7 @@ export function Layout() {
 
       <footer className="no-print border-t border-slate-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 py-3 text-xs text-slate-500 sm:px-6">
-          {persistent
-            ? 'Vos évaluations sont enregistrées dans ce navigateur uniquement (pas de compte, pas de serveur). '
-            : 'Stockage du navigateur indisponible : vos évaluations seront perdues à la fermeture de l’onglet. '}
+          Évaluations enregistrées automatiquement dans la base de l'équipe (accès réservé aux comptes autorisés).
           Les notes « IA » sont une simulation à base de règles, à valider par la consultante.
         </div>
       </footer>

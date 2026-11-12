@@ -1,7 +1,7 @@
-import { ChevronRight, Copy, FileUp, Inbox, ListChecks, Search, Sparkles, Star, SearchX, CheckCircle2, X } from 'lucide-react';
-import { useMemo, useRef, type ChangeEvent } from 'react';
+import { ChevronRight, Copy, Inbox, ListChecks, Search, Sparkles, Star, SearchX, CheckCircle2, X } from 'lucide-react';
+import { useMemo } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { DataGate } from '../components/DataGate';
+import { DataGate, ImportCsvButton } from '../components/DataGate';
 import { EmptyState, KpiCard, Notice, PageHeader, ScoreValue, STATUS_LABELS, StatusBadge, Tag, formatDate } from '../components/ui';
 import {
   DEFAULT_FILTERS,
@@ -90,15 +90,11 @@ function Dashboard() {
     duplicatePairCount,
     aiPending,
     generateAllAiSuggestions,
-    importCsvFile,
-    dataset,
-    restoreDefaultDataset,
     importWarnings,
   } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
   const backState = { from: `${location.pathname}${location.search}` };
-  const fileInput = useRef<HTMLInputElement>(null);
   const [filters, setFilters, resetFilters] = useFiltersFromUrl();
 
   const directions = useMemo(() => distinctValues(ideas, (idea) => idea.direction), [ideas]);
@@ -113,12 +109,6 @@ function Dashboard() {
   const filtersActive = FILTER_KEYS.some((key) => key !== 'sort' && filters[key] !== '');
   const generating = aiPending.size > 0;
 
-  const onFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (file) await importCsvFile(file);
-  };
-
   return (
     <>
       <PageHeader
@@ -126,11 +116,7 @@ function Dashboard() {
         description="Consultez, filtrez et évaluez les idées du challenge. Cliquez sur une idée pour la noter."
         actions={
           <>
-            <button type="button" className="btn-secondary" onClick={() => fileInput.current?.click()}>
-              <FileUp className="size-4" aria-hidden />
-              Importer un CSV
-            </button>
-            <input ref={fileInput} type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
+            <ImportCsvButton />
             <button type="button" className="btn-primary" onClick={generateAllAiSuggestions} disabled={generating || aiCount === ideas.length}>
               <Sparkles className="size-4" aria-hidden />
               {generating ? 'Analyse en cours…' : aiCount === ideas.length ? 'Toutes pré-notées' : 'Pré-noter avec l’IA'}
@@ -139,19 +125,9 @@ function Dashboard() {
         }
       />
 
-      {dataset.imported && (
-        <div className="mb-4">
-          <Notice title={`Fichier importé : ${dataset.name}`}>
-            Les évaluations de ce fichier sont conservées séparément de celles du challenge Hexavia.{' '}
-            <button type="button" className="font-medium underline" onClick={restoreDefaultDataset}>
-              Revenir aux idées Hexavia
-            </button>
-          </Notice>
-        </div>
-      )}
       {importWarnings.length > 0 && (
         <div className="mb-4">
-          <Notice tone="warning" title="Certaines lignes du fichier ont été ajustées">
+          <Notice tone="warning" title="Dernier import : certaines lignes ont été ajustées">
             <ul className="list-disc pl-4">
               {importWarnings.slice(0, 5).map((warning) => (
                 <li key={warning}>{warning}</li>

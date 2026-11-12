@@ -49,7 +49,7 @@ function BackLink() {
 
 function IdeaDetail() {
   const { ideaId = '' } = useParams();
-  const { ideasById, workspace, toggleShortlist } = useAppStore();
+  const { ideasById, workspace, toggleShortlist, shortlistPending } = useAppStore();
   const idea = ideasById.get(ideaId);
 
   if (!idea) {
@@ -84,6 +84,7 @@ function IdeaDetail() {
         <button
           type="button"
           onClick={() => toggleShortlist(idea.id)}
+          disabled={shortlistPending.has(idea.id)}
           className={selected ? 'btn border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100' : 'btn-secondary'}
           aria-pressed={selected}
         >
@@ -245,6 +246,7 @@ function EvaluationPanel({
   const [draft, setDraft] = useState<Draft>(() => (evaluation ? { ...evaluation.scores } : {}));
   const [comment, setComment] = useState(evaluation?.comment ?? '');
   const [showErrors, setShowErrors] = useState(false);
+  const [saving, setSaving] = useState(false);
   const pending = aiPending.has(idea.id);
 
   const complete = isCompleteCriteria(draft);
@@ -262,12 +264,15 @@ function EvaluationPanel({
     setComment(evaluation?.comment ?? '');
     setShowErrors(false);
   };
-  const submit = () => {
+  const submit = async () => {
     if (!complete) {
       setShowErrors(true);
       return;
     }
-    saveEvaluation(idea.id, draft, comment);
+    setSaving(true);
+    // En cas de succès, le panneau est remonté (clé = date de modification) ; sinon le brouillon est conservé.
+    const ok = await saveEvaluation(idea.id, draft, comment);
+    if (!ok) setSaving(false);
   };
 
   return (
@@ -373,8 +378,9 @@ function EvaluationPanel({
               `${filledCount}/4 critères notés`
             )}
           </span>
-          <button type="button" className="btn-primary" onClick={submit} disabled={!dirty && !!evaluation}>
-            {evaluation ? (dirty ? 'Enregistrer les modifications' : 'Évaluation enregistrée') : 'Valider l’évaluation'}
+          <button type="button" className="btn-primary" onClick={submit} disabled={saving || (!dirty && !!evaluation)}>
+            {saving && <Loader2 className="size-4 animate-spin" aria-hidden />}
+            {saving ? 'Enregistrement…' : evaluation ? (dirty ? 'Enregistrer les modifications' : 'Évaluation enregistrée') : 'Valider l’évaluation'}
           </button>
         </div>
       </div>

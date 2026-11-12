@@ -1,31 +1,26 @@
 /**
- * État applicatif : chargement des idées, état de travail persistant et actions.
- * La logique métier vit dans src/domain ; ce module ne fait que l'orchestrer.
+ * État applicatif : session Supabase, chargement des données, actions et retours utilisateur.
+ * La logique métier vit dans src/domain, la persistance dans src/data ; ce module orchestre.
+ * Les écritures sont « pessimistes » : l'état local n'est mis à jour qu'après confirmation
+ * du serveur, pour ne jamais afficher comme enregistrée une note qui ne l'est pas.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createAiProvider } from '../ai/config';
 import { CsvImportError, parseIdeasCsv } from '../data/csv';
-import { createBrowserRepository } from '../data/repository';
+import { RepositoryError, SupabaseRepository, type IdeaPilotRepository } from '../data/repository';
+import { supabase } from '../data/supabaseClient';
 import { findDuplicatePairs, indexDuplicates } from '../domain/duplicates';
+import { isCompleteCriteria } from '../domain/scoring';
 import { emptyWorkspace, type DuplicateCandidate, type Idea, type ScoreCriteria, type WorkspaceState } from '../domain/types';
-import {
-  recordAiSuggestion,
-  recordAiSuggestions,
-  removeHumanEvaluation,
-  saveHumanEvaluation,
-  toggleShortlist as toggleShortlistTransition,
-} from '../domain/workspace';
+import { recordAiSuggestion, recordAiSuggestions, removeFromShortlist, removeHumanEvaluation } from '../domain/workspace';
 
-const DEFAULT_DATASET = { id: 'hexavia-2026', name: 'Challenge innovation Hexavia', url: '/data/idees_hexavia.csv' };
-const IMPORTED_DATASET_KEY = 'ideapilot:imported-dataset';
+export type AuthState =
+  | { status: 'checking' }
+  | { status: 'signed-out' }
+  | { status: 'not-member'; email: string }
+  | { status: 'signed-in'; email: string; userId: string };
 
-interface Dataset {
-  id: string;
-  name: string;
-  imported: boolean;
-}
-
-type LoadState = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready' };
+type LoadState = { status: 'idle' } | { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready' };
 
 export type ToastTone = 'success' | 'error' | 'info';
 export interface Toast {
@@ -35,24 +30,28 @@ export interface Toast {
 }
 
 interface AppStore {
+  auth: AuthState;
+  signIn: (email: string, password: string) => Promise<string | null>;
+  signOut: () => Promise<void>;
   load: LoadState;
-  dataset: Dataset;
   ideas: Idea[];
   ideasById: Map<string, Idea>;
-  importWarnings: string[];
   workspace: WorkspaceState;
-  persistent: boolean;
   duplicatesOf: (ideaId: string) => DuplicateCandidate[];
   duplicatePairCount: number;
   aiProviderLabel: string;
   aiPending: ReadonlySet<string>;
+  /** Écritures en cours (indicateur « Enregistrement… »). */
+  savingCount: number;
+  shortlistPending: ReadonlySet<string>;
+  importing: boolean;
+  importWarnings: string[];
   generateAiSuggestion: (ideaId: string) => Promise<void>;
   generateAllAiSuggestions: () => Promise<void>;
-  saveEvaluation: (ideaId: string, scores: Partial<Record<keyof ScoreCriteria, unknown>>, comment: string) => boolean;
-  deleteEvaluation: (ideaId: string) => void;
-  toggleShortlist: (ideaId: string) => void;
+  saveEvaluation: (ideaId: string, scores: Partial<Record<keyof ScoreCriteria, unknown>>, comment: string) => Promise<boolean>;
+  deleteEvaluation: (ideaId: string) => Promise<void>;
+  toggleShortlist: (ideaId: string) => Promise<void>;
   importCsvFile: (file: File) => Promise<void>;
-  restoreDefaultDataset: () => void;
   retryLoad: () => void;
   toasts: Toast[];
   notify: (message: string, tone?: ToastTone) => void;
@@ -61,248 +60,272 @@ interface AppStore {
 
 const StoreContext = createContext<AppStore | null>(null);
 
-/** Empreinte courte et stable d'un texte, pour isoler l'état de travail de chaque fichier importé. */
-function hashText(text: string): string {
-  let hash = 5381;
-  for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
-  return (hash >>> 0).toString(36);
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof RepositoryError || error instanceof CsvImportError) return error.message;
+  return fallback;
 }
 
-interface StoredImport {
-  name: string;
-  text: string;
-}
-
-function readStoredImport(): StoredImport | null {
-  try {
-    const raw = window.localStorage.getItem(IMPORTED_DATASET_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === 'object' && parsed !== null && 'name' in parsed && 'text' in parsed) {
-      const { name, text } = parsed as Record<string, unknown>;
-      if (typeof name === 'string' && typeof text === 'string') return { name, text };
-    }
-  } catch {
-    // ignoré : on retombe sur le jeu par défaut
-  }
-  return null;
+function withItem<T>(set: ReadonlySet<T>, item: T, present: boolean): ReadonlySet<T> {
+  const next = new Set(set);
+  if (present) next.add(item);
+  else next.delete(item);
+  return next;
 }
 
 export function AppStoreProvider({ children }: { children: ReactNode }) {
-  const [{ repository, persistent }] = useState(createBrowserRepository);
+  const [repository] = useState<IdeaPilotRepository | null>(() => (supabase ? new SupabaseRepository(supabase) : null));
   const [aiProvider] = useState(() => createAiProvider());
-  const [load, setLoad] = useState<LoadState>({ status: 'loading' });
-  const [dataset, setDataset] = useState<Dataset>({ id: DEFAULT_DATASET.id, name: DEFAULT_DATASET.name, imported: false });
+  const [auth, setAuth] = useState<AuthState>({ status: 'checking' });
+  const [load, setLoad] = useState<LoadState>({ status: 'idle' });
   const [ideas, setIdeas] = useState<Idea[]>([]);
-  const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [workspace, setWorkspace] = useState<WorkspaceState>(emptyWorkspace);
   const [aiPending, setAiPending] = useState<ReadonlySet<string>>(new Set());
+  const [shortlistPending, setShortlistPending] = useState<ReadonlySet<string>>(new Set());
+  const [savingCount, setSavingCount] = useState(0);
+  const [importing, setImporting] = useState(false);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [reloadToken, setReloadToken] = useState(0);
   const toastId = useRef(0);
-  const datasetIdRef = useRef(dataset.id);
 
   const notify = useCallback((message: string, tone: ToastTone = 'success') => {
     toastId.current += 1;
     const id = toastId.current;
     setToasts((current) => [...current, { id, message, tone }]);
-    window.setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 4000);
+    window.setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), tone === 'error' ? 7000 : 4000);
   }, []);
   const dismissToast = useCallback((id: number) => setToasts((current) => current.filter((toast) => toast.id !== id)), []);
 
-  const activate = useCallback(
-    (next: Dataset, nextIdeas: Idea[], warnings: string[]) => {
-      datasetIdRef.current = next.id;
-      setDataset(next);
-      setIdeas(nextIdeas);
-      setImportWarnings(warnings);
-      setWorkspace(repository.load(next.id));
-      setLoad({ status: 'ready' });
+  /** Encadre une écriture : compteur « Enregistrement… » et message d'erreur lisible. */
+  const persist = useCallback(
+    async <T,>(operation: () => Promise<T>, failure: string): Promise<T | undefined> => {
+      setSavingCount((count) => count + 1);
+      try {
+        return await operation();
+      } catch (error) {
+        notify(errorMessage(error, failure), 'error');
+        return undefined;
+      } finally {
+        setSavingCount((count) => count - 1);
+      }
     },
-    [repository],
+    [notify],
   );
 
-  // Chargement initial : fichier importé précédemment, sinon l'export Hexavia fourni.
+  // --- Session et appartenance à l'équipe ---------------------------------------------
   useEffect(() => {
+    if (!supabase) return;
+    const client = supabase;
+    let cancelled = false;
+
+    const resolve = async (user: { id: string; email?: string } | null) => {
+      if (!user) {
+        if (!cancelled) setAuth({ status: 'signed-out' });
+        return;
+      }
+      const { data, error } = await client.from('team_members').select('user_id').eq('user_id', user.id).maybeSingle();
+      if (cancelled) return;
+      const email = user.email ?? '';
+      setAuth(error || !data ? { status: 'not-member', email } : { status: 'signed-in', email, userId: user.id });
+    };
+
+    client.auth.getSession().then(({ data }) => resolve(data.session?.user ?? null));
+    const { data: subscription } = client.auth.onAuthStateChange((event, session) => {
+      // Différé : on ne doit pas appeler Supabase de façon synchrone dans ce callback.
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
+        window.setTimeout(() => resolve(session?.user ?? null), 0);
+      }
+    });
+    return () => {
+      cancelled = true;
+      subscription.subscription.unsubscribe();
+    };
+  }, []);
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    if (!supabase) return 'Application non configurée.';
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (!error) return null;
+    if (/invalid login credentials/i.test(error.message)) return 'Adresse e-mail ou mot de passe incorrect.';
+    if (/email not confirmed/i.test(error.message)) return 'Adresse e-mail non confirmée.';
+    return 'Connexion impossible pour le moment. Réessayez dans un instant.';
+  }, []);
+
+  const signOut = useCallback(async () => {
+    await supabase?.auth.signOut();
+    setIdeas([]);
+    setWorkspace(emptyWorkspace());
+    setLoad({ status: 'idle' });
+  }, []);
+
+  // --- Chargement des données --------------------------------------------------------
+  const signedInUser = auth.status === 'signed-in' ? auth.userId : null;
+  useEffect(() => {
+    if (!repository || !signedInUser) return;
     let cancelled = false;
     setLoad({ status: 'loading' });
-    (async () => {
-      try {
-        const stored = readStoredImport();
-        if (stored) {
-          const { ideas: parsed, warnings } = parseIdeasCsv(stored.text);
-          if (!cancelled) activate({ id: `import-${hashText(stored.text)}`, name: stored.name, imported: true }, parsed, warnings);
-          return;
-        }
-        const response = await fetch(DEFAULT_DATASET.url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const { ideas: parsed, warnings } = parseIdeasCsv(await response.text());
-        if (!cancelled) activate({ id: DEFAULT_DATASET.id, name: DEFAULT_DATASET.name, imported: false }, parsed, warnings);
-      } catch (error) {
+    repository
+      .loadAll()
+      .then((data) => {
         if (cancelled) return;
-        const message =
-          error instanceof CsvImportError
-            ? error.message
-            : 'Impossible de charger les idées. Vérifiez votre connexion puis réessayez.';
-        setLoad({ status: 'error', message });
-      }
-    })();
+        setIdeas(data.ideas);
+        setWorkspace(data.workspace);
+        setLoad({ status: 'ready' });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setLoad({ status: 'error', message: errorMessage(error, 'Impossible de charger les idées. Vérifiez votre connexion puis réessayez.') });
+      });
     return () => {
       cancelled = true;
     };
-  }, [activate, reloadToken]);
+  }, [repository, signedInUser, reloadToken]);
 
-  /** Applique une transition et persiste immédiatement. */
-  const update = useCallback(
-    (transition: (state: WorkspaceState) => WorkspaceState) => {
-      setWorkspace((current) => {
-        const next = transition(current);
-        try {
-          repository.save(datasetIdRef.current, next);
-        } catch {
-          notify("L'enregistrement local a échoué (stockage plein ou bloqué).", 'error');
-        }
-        return next;
-      });
-    },
-    [repository, notify],
-  );
+  const retryLoad = useCallback(() => setReloadToken((token) => token + 1), []);
 
   const ideasById = useMemo(() => new Map(ideas.map((idea) => [idea.id, idea])), [ideas]);
   const duplicatePairs = useMemo(() => findDuplicatePairs(ideas), [ideas]);
   const duplicateIndex = useMemo(() => indexDuplicates(duplicatePairs), [duplicatePairs]);
   const duplicatesOf = useCallback((ideaId: string) => duplicateIndex.get(ideaId) ?? [], [duplicateIndex]);
 
-  const setPending = (ids: string[], pending: boolean) =>
-    setAiPending((current) => {
-      const next = new Set(current);
-      for (const id of ids) {
-        if (pending) next.add(id);
-        else next.delete(id);
-      }
-      return next;
-    });
-
+  // --- Actions -------------------------------------------------------------------------
   const generateAiSuggestion = useCallback(
     async (ideaId: string) => {
       const idea = ideasById.get(ideaId);
-      if (!idea) return;
-      setPending([ideaId], true);
-      try {
-        const suggestion = await aiProvider.suggest(idea);
-        update((state) => recordAiSuggestion(state, suggestion));
-      } catch {
-        notify("La proposition de l'IA n'a pas pu être générée. Réessayez.", 'error');
-      } finally {
-        setPending([ideaId], false);
-      }
+      if (!idea || !repository) return;
+      setAiPending((set) => withItem(set, ideaId, true));
+      const suggestion = await persist(async () => {
+        const result = await aiProvider.suggest(idea);
+        await repository.saveAiSuggestions([result]);
+        return result;
+      }, "La proposition de l'IA n'a pas pu être enregistrée.");
+      if (suggestion) setWorkspace((state) => recordAiSuggestion(state, suggestion));
+      setAiPending((set) => withItem(set, ideaId, false));
     },
-    [aiProvider, ideasById, update, notify],
+    [aiProvider, ideasById, repository, persist],
   );
 
   const generateAllAiSuggestions = useCallback(async () => {
+    if (!repository) return;
     const targets = ideas.filter((idea) => !workspace.aiSuggestions[idea.id]);
     if (targets.length === 0) {
       notify('Toutes les idées ont déjà une proposition IA.', 'info');
       return;
     }
-    const ids = targets.map((idea) => idea.id);
-    setPending(ids, true);
-    try {
-      const suggestions = await Promise.all(targets.map((idea) => aiProvider.suggest(idea)));
-      update((state) => recordAiSuggestions(state, suggestions));
-      notify(`${suggestions.length} propositions IA générées. Vos évaluations existantes sont inchangées.`);
-    } catch {
-      notify("Les propositions de l'IA n'ont pas pu être générées. Réessayez.", 'error');
-    } finally {
-      setPending(ids, false);
+    setAiPending(new Set(targets.map((idea) => idea.id)));
+    const suggestions = await persist(async () => {
+      const results = await Promise.all(targets.map((idea) => aiProvider.suggest(idea)));
+      await repository.saveAiSuggestions(results);
+      return results;
+    }, "Les propositions de l'IA n'ont pas pu être enregistrées.");
+    if (suggestions) {
+      setWorkspace((state) => recordAiSuggestions(state, suggestions));
+      notify(`${suggestions.length} propositions IA enregistrées. Vos évaluations existantes sont inchangées.`);
     }
-  }, [aiProvider, ideas, workspace.aiSuggestions, update, notify]);
+    setAiPending(new Set());
+  }, [aiProvider, ideas, workspace.aiSuggestions, repository, persist, notify]);
 
   const saveEvaluation = useCallback(
-    (ideaId: string, scores: Partial<Record<keyof ScoreCriteria, unknown>>, comment: string) => {
-      try {
-        // Validation hors du setter : une erreur ne doit pas casser la mise à jour d'état.
-        saveHumanEvaluation(emptyWorkspace(), ideaId, scores, comment);
-      } catch (error) {
-        notify(error instanceof Error ? error.message : 'Évaluation invalide.', 'error');
+    async (ideaId: string, scores: Partial<Record<keyof ScoreCriteria, unknown>>, comment: string) => {
+      if (!repository) return false;
+      if (!isCompleteCriteria(scores)) {
+        notify('Chaque critère doit recevoir une note entière de 1 à 5.', 'error');
         return false;
       }
-      const now = new Date();
-      update((state) => saveHumanEvaluation(state, ideaId, scores, comment, now));
+      const clean: ScoreCriteria = { impact: scores.impact, feasibility: scores.feasibility, alignment: scores.alignment, innovation: scores.innovation };
+      const saved = await persist(() => repository.saveEvaluation(ideaId, clean, comment), "L'évaluation n'a pas pu être enregistrée.");
+      if (!saved) return false;
+      setWorkspace((state) => ({ ...state, evaluations: { ...state.evaluations, [ideaId]: saved } }));
       notify('Évaluation enregistrée.');
       return true;
     },
-    [update, notify],
+    [repository, persist, notify],
   );
 
   const deleteEvaluation = useCallback(
-    (ideaId: string) => {
-      update((state) => removeHumanEvaluation(state, ideaId));
+    async (ideaId: string) => {
+      if (!repository) return;
+      const done = await persist(async () => {
+        await repository.deleteEvaluation(ideaId);
+        return true;
+      }, "L'évaluation n'a pas pu être effacée.");
+      if (!done) return;
+      setWorkspace((state) => removeHumanEvaluation(state, ideaId));
       notify('Évaluation effacée. La proposition IA est conservée.', 'info');
     },
-    [update, notify],
+    [repository, persist, notify],
   );
 
   const toggleShortlist = useCallback(
-    (ideaId: string) => {
+    async (ideaId: string) => {
+      if (!repository || shortlistPending.has(ideaId)) return;
       const wasSelected = ideaId in workspace.shortlist;
-      update((state) => toggleShortlistTransition(state, ideaId));
-      notify(wasSelected ? `${ideaId} retirée de la shortlist.` : `${ideaId} ajoutée à la shortlist.`, wasSelected ? 'info' : 'success');
+      setShortlistPending((set) => withItem(set, ideaId, true));
+      if (wasSelected) {
+        const done = await persist(async () => {
+          await repository.removeFromShortlist(ideaId);
+          return true;
+        }, 'La shortlist n’a pas pu être mise à jour.');
+        if (done) {
+          setWorkspace((state) => removeFromShortlist(state, ideaId));
+          notify(`${ideaId} retirée de la shortlist.`, 'info');
+        }
+      } else {
+        const selection = await persist(() => repository.addToShortlist(ideaId), 'La shortlist n’a pas pu être mise à jour.');
+        if (selection) {
+          setWorkspace((state) => ({ ...state, shortlist: { ...state.shortlist, [ideaId]: selection } }));
+          notify(`${ideaId} ajoutée à la shortlist.`);
+        }
+      }
+      setShortlistPending((set) => withItem(set, ideaId, false));
     },
-    [workspace.shortlist, update, notify],
+    [repository, workspace.shortlist, shortlistPending, persist, notify],
   );
 
   const importCsvFile = useCallback(
     async (file: File) => {
+      if (!repository) return;
+      setImporting(true);
       try {
-        const text = await file.text();
-        const { ideas: parsed, warnings } = parseIdeasCsv(text);
-        try {
-          window.localStorage.setItem(IMPORTED_DATASET_KEY, JSON.stringify({ name: file.name, text }));
-        } catch {
-          notify("Le fichier est chargé mais ne pourra pas être conservé après fermeture de l'onglet.", 'info');
+        const { ideas: parsed, warnings } = parseIdeasCsv(await file.text());
+        const known = new Set(ideas.map((idea) => idea.id));
+        const added = parsed.filter((idea) => !known.has(idea.id)).length;
+        const count = await persist(() => repository.importIdeas(parsed), 'L’import n’a pas pu être enregistré.');
+        if (count !== undefined) {
+          setImportWarnings(warnings);
+          notify(`${count} idées importées depuis ${file.name} : ${added} nouvelle${added > 1 ? 's' : ''}, ${count - added} mise${count - added > 1 ? 's' : ''} à jour.`);
+          retryLoad();
         }
-        activate({ id: `import-${hashText(text)}`, name: file.name, imported: true }, parsed, warnings);
-        notify(`${parsed.length} idées importées depuis ${file.name}.`);
       } catch (error) {
-        notify(error instanceof CsvImportError ? error.message : 'Le fichier n’a pas pu être lu.', 'error');
+        notify(errorMessage(error, 'Le fichier n’a pas pu être lu.'), 'error');
+      } finally {
+        setImporting(false);
       }
     },
-    [activate, notify],
+    [repository, ideas, persist, notify, retryLoad],
   );
 
-  const restoreDefaultDataset = useCallback(() => {
-    try {
-      window.localStorage.removeItem(IMPORTED_DATASET_KEY);
-    } catch {
-      // stockage indisponible : rien à nettoyer
-    }
-    setReloadToken((token) => token + 1);
-    notify('Retour aux idées du challenge Hexavia.', 'info');
-  }, [notify]);
-
-  const retryLoad = useCallback(() => setReloadToken((token) => token + 1), []);
-
   const value: AppStore = {
+    auth,
+    signIn,
+    signOut,
     load,
-    dataset,
     ideas,
     ideasById,
-    importWarnings,
     workspace,
-    persistent,
     duplicatesOf,
     duplicatePairCount: duplicatePairs.length,
     aiProviderLabel: aiProvider.label,
     aiPending,
+    savingCount,
+    shortlistPending,
+    importing,
+    importWarnings,
     generateAiSuggestion,
     generateAllAiSuggestions,
     saveEvaluation,
     deleteEvaluation,
     toggleShortlist,
     importCsvFile,
-    restoreDefaultDataset,
     retryLoad,
     toasts,
     notify,

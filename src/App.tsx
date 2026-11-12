@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { AuthGate } from './components/AuthGate';
 import { Layout } from './components/Layout';
 import { DashboardPage } from './pages/DashboardPage';
 import { IdeaDetailPage } from './pages/IdeaDetailPage';
@@ -10,6 +11,7 @@ export function App() {
   return (
     <AppStoreProvider>
       <BrowserRouter>
+        <AuthGate>
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<DashboardPage />} />
@@ -18,6 +20,7 @@ export function App() {
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>
+        </AuthGate>
       </BrowserRouter>
     </AppStoreProvider>
   );

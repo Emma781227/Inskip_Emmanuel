@@ -27,7 +27,7 @@ function downloadText(filename: string, content: string, type: string) {
 }
 
 function Shortlist() {
-  const { ideas, workspace, toggleShortlist, dataset, notify } = useAppStore();
+  const { ideas, workspace, toggleShortlist, shortlistPending, notify } = useAppStore();
   const rows = useMemo(() => buildShortlist(ideas, workspace), [ideas, workspace]);
   const unevaluated = rows.filter((row) => !row.evaluation).length;
   const sizeStatus = shortlistSizeStatus(rows.length);
@@ -46,7 +46,7 @@ function Shortlist() {
         description={
           <>
             <span className="no-print">Idées retenues, classées par score final. Objectif indicatif : environ {SHORTLIST_TARGET} idées.</span>
-            <span className="hidden print:inline">{dataset.name} · {rows.length} idées retenues · document du {today}</span>
+            <span className="hidden print:inline">Challenge innovation Hexavia · {rows.length} idées retenues · document du {today}</span>
           </>
         }
         actions={
@@ -112,7 +112,7 @@ function Shortlist() {
                   </div>
                   <div className="flex items-center gap-3 pl-12 sm:pl-0">
                     <ScoreValue score={row.finalScore} size="lg" />
-                    <button type="button" className="btn-ghost no-print" onClick={() => toggleShortlist(row.idea.id)} title="Retirer de la shortlist">
+                    <button type="button" className="btn-ghost no-print" onClick={() => toggleShortlist(row.idea.id)} disabled={shortlistPending.has(row.idea.id)} title="Retirer de la shortlist">
                       <StarOff className="size-4" aria-hidden />
                       <span className="sm:sr-only">Retirer</span>
                     </button>

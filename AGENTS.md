@@ -19,7 +19,10 @@ Avant tout commit : `npm run typecheck && npm test && npm run build` doivent pas
 
 - `src/domain/` — logique métier **pure** (pas de React, pas de `window`) : types, normalisation,
   notation, doublons, filtres, shortlist/export. Toute règle métier vit ici et est testée.
-- `src/data/` — entrées/sorties : lecture du CSV (Papa Parse), repository de persistance.
+- `src/data/` — entrées/sorties : lecture du CSV (Papa Parse), client Supabase typé (`database.types.ts`),
+  conversions ligne ↔ modèle (`mappers.ts`, testées), `IdeaPilotRepository` / `SupabaseRepository`.
+- `supabase/migrations/` — schéma SQL versionné. Toute évolution de schéma = nouvelle migration
+  (jamais de modification d'une migration déjà appliquée) + mise à jour de `database.types.ts`.
 - `src/ai/` — `AiScoringProvider` (contrat) et `MockAiScoringProvider` (simulation déterministe).
 - `src/state/` — orchestration React (contexte unique `AppStore`), sans règle métier.
 - `src/components/`, `src/pages/` — interface uniquement.
@@ -48,9 +51,13 @@ Avant tout commit : `npm run typecheck && npm test && npm run build` doivent pas
 ## Sécurité et données
 
 - Aucun secret dans le dépôt. Seul `.env.example` est versionné.
+- Côté navigateur : uniquement `VITE_SUPABASE_URL` et la clé PUBLIQUE (`VITE_SUPABASE_PUBLISHABLE_KEY`,
+  ou `VITE_SUPABASE_ANON_KEY` en compatibilité). Jamais de `service_role` / `sb_secret_…`.
+- Toute table a la RLS activée ; rien n'est accordé à `anon` ; l'accès passe par `is_team_member()`.
+- Le CSV (noms d'auteurs) n'est jamais servi publiquement : il est importé par un membre connecté.
 - Aucune clé de modèle ne doit être préfixée `VITE_` (elle serait exposée au navigateur) :
   un vrai fournisseur IA passera par une fonction serveur.
-- Les données (noms d'auteurs) restent dans le navigateur ; ne pas les envoyer à un service tiers.
+- Ne pas envoyer les données (noms d'auteurs) à un service tiers autre que la base Supabase du projet.
 
 ## Méthode
 
