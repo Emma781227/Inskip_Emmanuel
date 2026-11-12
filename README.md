@@ -1,326 +1,156 @@
 # IdeaPilot
 
-Outil d'aide au dépouillement du challenge d'innovation Hexavia : consulter les 40 idées,
-les noter sur la grille du client avec une proposition « IA » simulée, repérer les doublons
-et sortir une shortlist d'environ 8 idées pour le jury.
+Outil d'aide au dépouillement du challenge d'innovation Hexavia : consulter les 40 idées, les noter
+sur la grille du client à partir d'une proposition « IA », repérer les doublons et sortir une
+shortlist d'environ 8 idées pour le jury.
 
 ## Aperçu
 
-- **Application en ligne :** https://inskip-emmanuel.vercel.app/
-- **Dépôt :** https://github.com/Emma781227/Inskip_Emmanuel
-- **Compte de démonstration :** `inskip@gmail.com` / `Inskip237`
-  (compte dédié à l'évaluation de l'exercice, données fictives ; à désactiver après la restitution)
+- **Application :** https://inskip-emmanuel.vercel.app/ (base Supabase configurée, 40 idées importées)
+- **Compte de démonstration :** `inskip@gmail.com` / `Inskip237`. Il sert uniquement à l'évaluation
+  de l'exercice, sur des données fictives, et sera désactivé après la restitution.
 
-La version en ligne est déjà branchée sur sa base Supabase : schéma appliqué, compte de démonstration
-autorisé, 40 idées importées. Il suffit de se connecter.
-
-### Tableau de bord
-![Tableau de bord : indicateurs, filtres (dont doublons) et liste paginée des idées](docs/Dashboard.png)
-
-### Fiche d'une idée
-![Fiche d'une idée : proposition IA justifiée critère par critère et évaluation de la consultante](docs/Idee.png)
-
-### Shortlist pour le jury
-![Shortlist : idées retenues classées par score final, export CSV et impression PDF](docs/Shortlist.png)
+| Tableau de bord | Fiche d'une idée | Shortlist |
+| --- | --- | --- |
+| ![Tableau de bord : indicateurs, filtres et liste paginée](docs/Dashboard.png) | ![Fiche : proposition IA justifiée et évaluation](docs/Idee.png) | ![Shortlist : classement, export CSV, impression](docs/Shortlist.png) |
 
 ## Lancer l'outil
 
-Pour utiliser l'outil, la version en ligne suffit. Les étapes ci-dessous servent à le faire tourner
-en local ou à l'installer pour un autre client (nouvelle base Supabase).
-
-Prérequis : Node.js 20 ou plus, un projet Supabase (offre gratuite).
-
 ```bash
 npm install
-cp .env.example .env.local   # renseigner VITE_SUPABASE_URL et VITE_SUPABASE_PUBLISHABLE_KEY
+cp .env.example .env.local   # URL et clé publique d'un projet Supabase
 npm run dev                  # http://localhost:5173
 ```
 
-Première mise en place de la base (une seule fois, environ 3 minutes) :
-
-1. **Schéma.** Dans Supabase > *SQL Editor*, exécuter
-   [`supabase/migrations/20261112170000_init_ideapilot.sql`](supabase/migrations/20261112170000_init_ideapilot.sql)
-   (ou `npx supabase link` puis `npx supabase db push`).
-2. **Compte démonstrateur.** *Authentication > Users > Add user* (e-mail + mot de passe, « Auto confirm »).
-   Désactiver les inscriptions publiques (*Authentication > Sign In / Providers > Allow new users to sign up*).
-3. **Autoriser ce compte.** Dans le SQL Editor :
-   `insert into public.team_members (user_id) select id from auth.users where email = 'demo@exemple.fr';`
-4. **Import initial.** Se connecter à l'application, cliquer « Importer le fichier des idées » et choisir
-   `data/idees_hexavia.csv`. L'import est **idempotent** : le relancer met à jour les 40 idées sans en
-   créer de nouvelles et sans toucher aux évaluations.
-
-Autres commandes : `npm test` (Vitest), `npm run typecheck`, `npm run build`.
-Sans configuration Supabase, l'application affiche un écran « Configuration requise » au lieu de planter.
+Pour une nouvelle base, il faut aussi exécuter la migration `supabase/migrations/`, créer un compte,
+l'autoriser, puis importer `data/idees_hexavia.csv` depuis l'application (environ 3 minutes,
+étapes dans [docs/details.md](docs/details.md#installation-complète-nouvelle-base-supabase)).
+Tests : `npm test`.
 
 ## 1. Cadrage
 
-**Le besoin.** Camille dépouille à la main, dans Excel, une quarantaine d'idées déposées par les
-salariés d'Hexavia. Elle veut (1) les voir et les filtrer au même endroit, (2) les noter de façon
-cohérente sur 4 critères de 1 à 5, (3) partir d'une proposition de l'IA qu'elle corrige,
-(4) repérer les doublons, (5) envoyer au client une shortlist d'environ 8 idées. Le jury
-est dans dix jours.
+**Besoin.** Camille dépouille à la main, dans Excel, une quarantaine d'idées. Elle veut les voir et
+les filtrer au même endroit, et les noter de façon cohérente sur 4 critères de 1 à 5, en partant
+d'une proposition de l'IA qu'elle corrige. Elle veut aussi repérer les doublons et envoyer au
+client une shortlist d'environ 8 idées, avant le jury, dans dix jours.
 
-**Utilisatrice.** Camille, consultante non technique. Le client et le jury reçoivent un export
-(CSV ou PDF) ; ils n'utilisent pas l'outil.
+**Utilisatrice :** Camille, consultante non technique. Le client et le jury reçoivent un export.
 
-**Hypothèses** (pas de questions possibles pendant l'exercice) :
+**Hypothèses :** score final = moyenne simple des 4 critères (pas de pondération donnée) ; seules
+les notes validées par Camille comptent ; la stratégie d'Hexavia étant inconnue, l'IA suppose comme
+prioritaires la productivité, la sécurité, l'énergie et le service client ; « environ 8 » est une
+cible indicative, pas une contrainte ; un doublon est signalé, jamais fusionné ; le budget saisi
+librement est conservé tel quel ; une base par challenge, partagée par l'équipe.
 
-- Une équipe restreinte (Camille, éventuellement un collègue) partage **une** base par challenge :
-  une évaluation par idée, la dernière enregistrée fait foi.
-- Score final = **moyenne simple** des 4 critères, sans pondération (le brief n'en donne pas).
-- Seules les notes **validées par Camille** comptent ; la proposition IA reste une aide.
-- La stratégie d'Hexavia est inconnue : la simulation suppose comme prioritaires
-  productivité, sécurité, énergie/environnement et service client.
-- « Environ 8 » : l'outil signale l'écart à la cible (6 à 10 jugé « dans la cible ») sans bloquer.
-- Le budget saisi librement est conservé tel quel ; un montant numérique est extrait
-  uniquement pour aider à juger la faisabilité.
-- Un doublon est **signalé, jamais fusionné** : Camille décide.
-- Le CSV fourni est fictif : il est versionné dans `data/` pour les tests et l'import, mais
-  **n'est pas servi** par l'application. Les noms des auteurs ne sont lisibles qu'après connexion.
-
-**Dans la V1 :** tableau des idées (recherche, filtres direction / thème / site / statut, tri
-par score ou date), fiche détaillée, notation 4 critères avec justification, proposition IA
-simulée et justifiée, doublons avec score de similarité, shortlist, export CSV (Excel FR),
-vue imprimable / PDF, import CSV idempotent (réutilisable pour d'autres clients), connexion
-Supabase Auth, sauvegarde dans Supabase avec indicateur d'enregistrement.
-
-**Reporté :** vrai modèle d'IA, plusieurs évaluateurs par idée (notes individuelles +
-consolidation), plusieurs challenges dans une même base, rôles (lecture seule pour le client),
-pondération des critères, fusion de doublons, historique des modifications.
+**V1 :** liste filtrable et paginée, fiche détaillée, notation avec justification, proposition IA
+simulée, doublons, shortlist, export CSV et PDF, import CSV réutilisable, connexion, sauvegarde en ligne.
+**Plus tard :** vrai modèle d'IA (prêt à brancher), plusieurs évaluateurs, pondération,
+fusion de doublons, plusieurs challenges par base.
 
 ## 2. Conception
 
-```
-CSV ──▶ data/csv.ts (Papa Parse) ──▶ Idea[]
-                                        │
-      domain/ (pur, testé) : scoring, duplicates, filters, shortlist, workspace
-                                        │
-ai/AiScoringProvider ◀── Mock…   data/repository.ts ──▶ Supabase (Postgres + RLS)
-                                        │      ▲ mappers.ts (ligne ↔ modèle)
-  state/AppStore (session, chargement, écritures) ──▶ AuthGate ──▶ pages/
-```
+- **Architecture.** React + Vite, en trois couches :
+  - `src/domain` : règles métier pures (notation, doublons, filtres, shortlist), testées sans React ni base ;
+  - `src/data` : import CSV et accès à Supabase derrière une interface `IdeaPilotRepository` ;
+  - l'interface.
+- **Données.** Cinq tables : `ideas` (identifiant du CSV `IDEA-001…` comme clé, budget et date
+  d'origine conservés), `ai_suggestions` et `evaluations` (deux tables distinctes, pour que relancer
+  l'IA ne puisse jamais écraser une note de Camille), `shortlist`, `team_members`. Notes contraintes
+  à 1–5 en base. Score, statut et doublons sont calculés, jamais stockés.
+- **Sécurité.** Supabase Auth et RLS sur toutes les tables, aucun accès anonyme. Il faut être
+  connecté **et** membre de l'équipe pour lire les noms des auteurs. Seule la clé publique est dans
+  le navigateur. Le CSV n'est pas servi par l'application.
+- **IA.** Interface `AiScoringProvider`. En V1, une simulation déterministe à base de règles,
+  présentée comme telle, qui signale les informations manquantes. Un vrai modèle (Claude, via une
+  fonction serveur qui garde la clé) est prêt et s'active par configuration. Le nom de l'auteur
+  n'est jamais envoyé.
+- **Doublons.** Normalisation, mots vides, synonymes, puis similarité de Jaccard. Seuils calibrés
+  sur les vraies données et ajustables dans le code.
+- **Stack**, choisie pour coller aux outils INSKIP (React, TypeScript strict, Supabase, Vercel) :
+  plus Tailwind, Papa Parse pour un CSV imparfait, Vitest et GitHub Actions.
 
-- **`src/domain`** contient toutes les règles métier, en TypeScript pur, sans React ni Supabase.
-  C'est ce qui est testé.
-- **Modèle métier** (`src/domain/types.ts`). `Idea` reprend le CSV (identifiants conservés, champs
-  vides = `null`, `budgetRaw` + `budgetEstimateEur`, `submittedAtRaw` + `submittedAt`).
-  `AiSuggestion` (notes proposées, justification par critère, alertes, fournisseur, date),
-  `HumanEvaluation` (notes de Camille, commentaire, date de modification) et `ShortlistSelection`
-  sont séparés. Doublons (`DuplicateCandidate`), statut et score final sont **calculés**, jamais
-  stockés. Cette séparation garantit que relancer l'IA ne peut pas écraser une note de Camille.
-- **Persistance : Supabase** (stack INSKIP), sans backend à écrire. Migration versionnée dans
-  `supabase/migrations/` :
-
-  | Table | Contenu | Clé |
-  | --- | --- | --- |
-  | `ideas` | export du formulaire, budget et date bruts conservés | `id` = identifiant métier du CSV |
-  | `ai_suggestions` | notes 1–5 proposées, justifications (`jsonb`), alertes, fournisseur | `idea_id` → `ideas` |
-  | `evaluations` | notes 1–5 validées, commentaire, auteur, `created_at` / `updated_at` | `idea_id` → `ideas` |
-  | `shortlist` | sélection pour le jury, auteur, date | `idea_id` → `ideas` |
-  | `team_members` | comptes autorisés | `user_id` → `auth.users` |
-
-  Contraintes `CHECK` sur les notes, index sur direction / thème / site / date, `updated_at` mis à
-  jour par trigger. L'application parle à une interface `IdeaPilotRepository` ; `SupabaseRepository`
-  l'implémente et `mappers.ts` convertit (et revalide) les lignes. Une écriture n'apparaît comme
-  enregistrée qu'une fois confirmée par le serveur.
-- **Sécurité.** RLS activée sur toutes les tables, aucun droit pour `anon`. Lire ou écrire exige
-  d'être connecté **et** inscrit dans `team_members` (fonction `is_team_member()`) : si les
-  inscriptions restaient ouvertes par erreur, un nouveau compte ne pourrait toujours pas lire les
-  noms. Aucune politique `delete` sur `ideas`. Le navigateur ne reçoit que l'URL et la clé
-  **publique** (publishable, ou anon en compatibilité) ; l'application refuse de démarrer si on
-  lui donne une clé secrète.
-- **IA.** L'interface `AiScoringProvider` isole le fournisseur, choisi par `VITE_AI_PROVIDER` :
-  - `mock` (défaut, V1) : `MockAiScoringProvider` applique des règles lisibles et déterministes
-    (budget → faisabilité, thème → alignement, mots-clés → impact et innovation), signale les
-    informations manquantes et se présente partout comme une simulation ;
-  - `http` (prêt, inactif) : `HttpAiScoringProvider` appelle la fonction Vercel `api/score.ts`.
-    Celle-ci vérifie la session Supabase **et** l'appartenance à l'équipe, valide l'idée, puis
-    appelle Claude (`claude-opus-5-5` par défaut, SDK officiel, sortie JSON imposée par un schéma
-    Zod, repli automatique de l'API si le modèle décline). La clé `ANTHROPIC_API_KEY` ne vit que
-    sur le serveur ; sans elle, la route répond 503 et l'interface l'explique.
-  Seul le contenu de l'idée est envoyé au modèle, **jamais le nom de son auteur**. Les notes du
-  modèle restent des propositions : même séparation, même validation 1–5 que pour la simulation.
-- **Doublons.** Normalisation (accents, casse, ponctuation), mots vides, synonymes courants
-  (chatbot → assistant…), racine naïve, puis similarité de Jaccard sur le texte complet
-  (seuil 0,16) et sur le titre (seuil 0,5). Titre identique = 100 %. Seuils réglés sur
-  l'export Hexavia et ajustables dans `src/domain/duplicates.ts`.
-- **Stack.** React + TypeScript strict (stack INSKIP), Vite, Tailwind CSS, React Router
-  (filtres conservés dans l'URL), Lucide, Papa Parse (CSV robuste : guillemets, BOM),
-  `@supabase/supabase-js` (types de base dans `database.types.ts`), Vitest, GitHub Actions, Vercel.
+Détails (schéma, sécurité, IA) : [docs/details.md](docs/details.md#conception-détaillée).
 
 ## 3. Construction avec l'IA
 
-**Assistant :** Claude Code (modèle Claude Opus 5.5), dans le terminal, avec un fichier
-d'instructions [`AGENTS.md`](AGENTS.md) (architecture, règles métier non négociables,
-sécurité, qualité). `CLAUDE.md` y renvoie.
+**Assistant :** Claude Code (Claude Opus 5.5), guidé par [`AGENTS.md`](AGENTS.md) : architecture,
+règles métier non négociables, sécurité et pièges déjà rencontrés.
 
 **Prompts les plus utiles :**
-
-1. Le brief de mission complet (rôle, stack, règles, 7 phases, critères d'acceptation),
-   avec la consigne : « Ne commence pas par générer du code. Analyse d'abord les documents
-   et inspecte l'environnement du projet. »
+1. « Ne commence pas par générer du code. Analyse d'abord les documents et inspecte l'environnement. »
 2. « Le score final ne doit jamais être remplacé silencieusement par la simulation IA. »
-   Ce prompt a donné le stockage séparé des propositions IA et des évaluations, et le test associé.
-3. « Créer une détection lexicale simple […] seuil documenté et ajustable dans le code. »
-   Il a déclenché une calibration sur les vraies données avant de fixer le seuil.
-4. « Ne jamais inventer de résultats de tests, de commits, de déploiement ou d'événements
-   du journal. »
-5. Le changement d'architecture en cours de route : « Supabase est désormais notre solution
-   principale de persistance […] configurer des politiques RLS qui protègent les lectures et
-   écritures. Ne pas exposer publiquement les noms des auteurs. » Ce prompt a conduit à retirer
-   le CSV des fichiers publics et à ajouter la liste `team_members`.
+3. « Détection lexicale simple […] seuil documenté et ajustable dans le code. »
+4. « Ne jamais inventer de résultats de tests, de commits, de déploiement ou d'événements du journal. »
+5. « Supabase est désormais notre solution principale de persistance […] Ne pas exposer
+   publiquement les noms des auteurs. »
 
-**Quand l'IA s'est trompée.** Premier jet de la détection de doublons : un seul seuil de
-Jaccard (0,25), choisi a priori. En affichant toutes les paires de l'export avec leur score,
-on a vu qu'il **ratait** de vrais doublons (« Assistant IA pour les questions RH » /
-« Chatbot RH » à 0,24 ; les deux idées sur les compresseurs à 0,20) et **signalait** un faux
-(« Covoiturage entre salariés » / « Former tous les salariés à l'IA », rapprochés par le
-seul mot « salariés »). Correctifs : mots génériques retirés, synonymes, racine des mots, et
-deux seuils séparés (titre / texte complet), car les titres courts créaient du bruit à 0,20.
-Une régression est aussi apparue pendant ce réglage : la troncature des mots cassait le pluriel
-(« pannes » ≠ « panne ») et faisait disparaître la paire des compresseurs. Elle a été repérée en
-relançant la même calibration. Ces cas sont maintenant figés dans `tests/duplicates.test.ts`.
+**Quand l'IA s'est trompée.**
+- **Seuil des doublons.** Son premier seuil, choisi a priori, ratait « Assistant IA RH » / « Chatbot
+  RH » et signalait un faux doublon entre deux idées sans rapport (le mot commun « salariés »). Je
+  l'ai vu en affichant toutes les paires avec leur score. Le seuil a été recalibré sur les données,
+  et ces cas sont figés dans les tests.
+- **CI.** Elle a annoncé la CI réparée après une vérification locale, mais le run suivant a encore
+  échoué. La vraie cause n'est apparue qu'en reproduisant l'environnement exact de la CI : npm 10 et
+  npm 11 lisent différemment le même lockfile.
 
-**La CI rouge, deux fois.** Le premier run GitHub Actions a échoué à `npm ci` ; l'annotation
-GitHub ne donnait que « exit code 1 ». En rejouant `npm ci` dans un dossier vierge, l'IA a trouvé
-un lockfile désynchronisé et l'a régénéré. Elle a annoncé le problème réglé après une vérification
-locale… et le run suivant a de nouveau échoué. La vraie cause n'est apparue qu'en reproduisant
-**l'environnement exact de la CI** (`npx npm@10 ci --os=linux`) : npm 10, fourni avec Node 22 en CI,
-et npm 11, utilisé en local, ne lisent pas le lockfile de la même façon (`Missing: @emnapi/core`).
-Correctif : la CI installe npm 11.6.2 avant `npm ci` ; run vert ensuite. Au passage, une tentative
-de « réparer » le lockfile avec `npm install --package-lock-only` l'avait abîmé : elle a été annulée
-avant commit. Leçon retenue : vérifier dans les conditions de la CI, pas seulement « à blanc » en local.
-
-Autres corrections : Tailwind v4 refusait `@apply` sur des classes maison (build cassé, classes
-passées en `@utility`) ; deux tests faux ont été réécrits (l'un supposait un mot absent des
-données, l'autre ne tolérait pas l'alignement des espaces dans le SQL).
+Récit détaillé : [docs/details.md](docs/details.md#erreurs-de-lia-en-détail).
 
 ## 4. Fiabilisation
 
-103 tests Vitest (`tests/`), centrés sur ce qui fausserait le travail de Camille. Ils tournent
-**sans Supabase ni réseau** : la logique métier est pure, la couche données est testée par ses
-conversions, et la fonction serveur IA par injection de dépendances.
+**103 tests Vitest**, sans réseau ni base, sur ce qui fausserait le travail de Camille :
+- l'import des 40 idées (séparateur `;`, champs vides, date au format français, budgets libres comme `15k€` ou `?`) ;
+- la notation (moyenne, bornes 1–5, l'IA n'écrase jamais une note humaine) ;
+- les doublons (vrais doublons détectés, faux positifs connus exclus) ;
+- la shortlist et son export CSV ;
+- la couche Supabase (import idempotent, clé secrète refusée, RLS vérifiée sur la migration) ;
+- la future route IA (pas d'appel sans clé, sans session ou hors équipe).
 
-- **Import :** 40 idées, identifiants IDEA-001 à 040 conservés, séparateur `;` et BOM,
-  champs vides → `null`, date au format français, champs entre guillemets, fichier invalide
-  refusé avec un message clair, lignes défectueuses signalées.
-- **Budgets libres :** `40 000 €`, `15k€`, `35k`, `30 000 euros`, `0`, `?`, vide, texte
-  entre parenthèses ; le texte brut est toujours conservé.
-- **Notation :** moyenne simple, notes entières 1–5, 4 critères obligatoires ; une
-  suggestion IA seule ne donne pas de score ; **relancer l'IA ne modifie pas une note humaine**.
-- **Simulation IA :** déterminisme sur les 40 idées, notes valides, justification par
-  critère, alertes pour informations manquantes.
-- **Doublons :** titres identiques, reformulations attendues détectées, faux positifs
-  connus exclus.
-- **Shortlist :** sélection / désélection, classement, cible souple, export CSV (BOM, `;`,
-  virgule décimale, uniquement les idées retenues).
-- **Couche Supabase (sans réseau) :** aller-retour base ↔ modèle sur les 40 idées, import
-  idempotent (fichier importé deux fois = 40 lignes), refus d'une note hors 1–5 lue en base,
-  clé publishable / anon acceptée et **clé secrète refusée**, contrôle statique de la migration
-  (RLS sur chaque table, rien pour `anon`, contraintes 1–5, pas de suppression d'idée).
-- **Filtres et pagination :** recherche sans accents, filtre « non renseigné », statut, doublons,
-  tris ; 15 idées par page, page hors bornes corrigée.
-- **IA réelle (préparée) :** aucun nom d'auteur envoyé au modèle, idée trop longue refusée (pas
-  tronquée), note hors 1–5 du modèle refusée, schéma de sortie, route serveur : 503 sans clé
-  (modèle jamais appelé), 401 sans session, 403 hors équipe, 502 sans fuite du détail d'erreur ;
-  côté navigateur : jeton envoyé, erreurs traduites, réponse revalidée.
-  La route a aussi été compilée et exécutée en ESM Node comme sur Vercel : 503 `not_configured`.
-
-**CI** (`.github/workflows/ci.yml`) : à chaque push et pull request, `npm ci`, vérification
-TypeScript, tests, build de production.
-
-**Vérifications manuelles.** Sur la version précédente (stockage local), dans Chrome :
-pré-notation, validation, persistance après rechargement, shortlist, filtres, aucune erreur
-console, pas de débordement horizontal à 390 px. Sur la version Supabase :
-
-- **Sécurité, contre la vraie base :** sans connexion, lecture et écriture refusées sur les
-  5 tables (`permission denied`, HTTP 401) ;
-- **parcours connecté** (fait à la main, visible sur les captures) : import des
-  40 idées, pré-notation, évaluation et shortlist enregistrées (« Tout est enregistré ») ;
-- **version en ligne :** routes directes (`/shortlist`, `/idees/IDEA-001`) servies, `/api/score`
-  répond 405 en GET et 503 `not_configured` en POST, CSV source non servi, aucun nom d'auteur
-  dans le code publié.
-
-Il n'y a ni test automatisé de l'interface, ni test d'intégration automatisé contre une vraie base.
+Vérifié aussi contre la vraie base : un visiteur non connecté ne peut rien lire ni écrire.
+**CI** : à chaque push, installation, vérification TypeScript, tests et build.
 
 ## 5. Livraison
 
-- Déploiement Vercel (preset Vite). `vercel.json` renvoie toutes les routes vers
-  `index.html` (application monopage).
-- Variables (Vercel > Settings > Environment Variables, et `.env.local` en local) :
-  `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` (ou `VITE_SUPABASE_ANON_KEY` si le projet
-  n'a que l'ancienne clé), `VITE_AI_PROVIDER=mock`. Aucun secret dans le dépôt : `.env*` est
-  ignoré, seul `.env.example` est versionné. Le brief INSKIP n'est pas republié.
-- Données personnelles : noms des porteurs visibles et exportés uniquement par les comptes
-  autorisés ; le fichier source n'est pas servi par l'application ; page marquée `noindex`.
-- **Compte de démonstration publié dans ce README** pour faciliter l'évaluation : choix assumé
-  pour un exercice aux données fictives. Avec de vraies données, il ne faudrait jamais publier
-  d'identifiants : comptes nominatifs créés par l'administrateur, mot de passe transmis à part.
-  Après la restitution, désactiver ce compte (Supabase > Authentication) et le retirer de `team_members`.
+- **Hébergement.** Vercel, avec trois variables publiques (`VITE_SUPABASE_URL`,
+  `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_AI_PROVIDER=mock`).
+- **Secrets.** Aucune clé technique dans le dépôt : `.env*` est ignoré et seul `.env.example` est
+  versionné. Le seul identifiant publié est le compte de démonstration ci-dessus, volontairement.
+  Avec de vraies données, chaque personne aurait son propre compte, transmis à part.
+- **Brancher un vrai modèle.** Ajouter `ANTHROPIC_API_KEY` côté serveur, passer
+  `VITE_AI_PROVIDER=http`, puis redéployer.
 
-**Activer un vrai modèle plus tard** (aucun code à écrire) :
-
-1. Vercel > Environment Variables : `ANTHROPIC_API_KEY` (sans préfixe `VITE_`), optionnellement
-   `AI_MODEL` (défaut `claude-opus-5-5`).
-2. Passer `VITE_AI_PROVIDER` à `http`, puis redéployer.
-3. Tester « Proposer une note IA » sur une idée : la note affichée est marquée « modèle de langage ».
-
-Point d'attention : l'envoi du contenu des idées à un fournisseur externe est à valider avec le
-client (données internes Hexavia), même sans les noms des auteurs.
-
-**Ce qui manque avant de confier l'outil à Camille :**
-
-- Créer le compte de Camille (pas un compte partagé) et lui montrer l'outil en 10 minutes.
-- Une base = un challenge : pour un autre client, il faut un nouveau projet Supabase (ou
-  ajouter une table `challenges`).
-- Si deux personnes notent la même idée en même temps, la dernière sauvegarde l'emporte.
-- Le dépôt GitHub public contient le CSV fictif (noms inventés) : à retirer pour de vraies données.
-- Le bundle JS fait environ 570 Ko (avertissement Vite, surtout dû à supabase-js) ; aucune gêne
-  constatée, mais un découpage serait possible.
+**Avant de confier l'outil à Camille :**
+- lui créer un compte nominatif et désactiver le compte de démonstration ;
+- faire valider par le client l'envoi des idées à un modèle externe ;
+- garder à l'esprit qu'une base correspond à un challenge, et que si deux personnes notent la même
+  idée en même temps, c'est la dernière sauvegarde qui l'emporte ;
+- garder la base active : un projet Supabase gratuit se met en pause après une semaine sans activité.
 
 ## 6. Journal
 
-Heures réelles (heure locale, 12/11/2026, d'après l'historique Git) :
-
 | Heure | Étape |
 | --- | --- |
-| 16:21 | Lecture du PDF et du CSV, audit des pièges de données, plan, installation |
-| 16:21–16:40 | Domaine métier, IA simulée, calibration des doublons sur les données, interface |
-| 16:40 | Trois commits : socle, domaine métier, interface (build vérifié) |
-| 16:41 | CSV conservé à l'octet près (`.gitattributes`) |
-| 16:41–16:45 | Vérification manuelle dans Chrome (pré-notation, évaluation, persistance, shortlist) |
-| 16:46 | 65 tests, CI GitHub Actions |
-| 16:47 | Libellés IA et filtres mobiles affinés après revue visuelle |
-| 16:49 | README ; push sur GitHub ; premier run CI **en échec** (`npm ci`) |
-| 16:52 | Décision : passer la persistance sur Supabase (Auth + RLS) |
-| 16:52–17:05 | Échec CI : première correction (lockfile), insuffisante ; migration SQL, client typé, connexion, états de sauvegarde ; 79 tests |
-| 17:05 | Trois commits Supabase (schéma et configuration, interface, tests) |
-| entre 17:07 et 17:29 | Projet Supabase créé, migration appliquée, compte autorisé ; refus d’accès anonyme vérifié ; import des 40 idées (hors Git, heure non tracée) |
-| 17:29 | CI de nouveau en échec, vraie cause trouvée (npm 10 vs 11) : CI enfin verte |
-| 17:34 | Pagination (15 idées par page) et filtre des doublons, demandés en cours de route |
-| entre 17:34 et 17:48 | Déploiement Vercel ; variables Supabase ajoutées puis redéploiement (hors Git) |
-| 17:48 | AGENTS.md / CLAUDE.md mis à jour (Supabase, pièges rencontrés) |
-| 18:05 | Branchement d'un vrai modèle IA préparé (route serveur, inactive sans clé) ; 103 tests |
-| 18:09 | Compte de démonstration ajouté au README |
-| 18:21 | Vérification de la version en ligne, captures, README finalisé |
+| 16:21 | Lecture du brief et du CSV, audit des données, plan |
+| 16:21–16:49 | Domaine métier, IA simulée, calibration des doublons, interface, 65 tests, CI, premier push |
+| 16:52–17:05 | Passage à Supabase (Auth + RLS), migration, connexion ; 79 tests |
+| 17:07–17:29 | Base Supabase configurée, idées importées ; CI réparée (npm 10 / 11) |
+| 17:34–17:48 | Pagination, filtre des doublons ; déploiement Vercel |
+| 18:05 | Vrai modèle IA prêt à brancher (inactif sans clé) ; 103 tests |
+| 18:09–18:21 | Vérification en ligne, captures, README |
+
+Heures issues de l'historique Git ; journal détaillé dans [docs/details.md](docs/details.md#journal-complet).
 
 ## 7. Suite et questions pour Camille
 
 **Avec une journée de plus :**
+- brancher le vrai modèle et le comparer à la simulation sur des idées notées par Camille ;
+- noter à plusieurs, avec consolidation des notes et un accès en lecture seule pour le client ;
+- marquer « pas un doublon » ;
+- tests d'interface sur le parcours principal.
 
-- Brancher la clé du modèle et construire un petit jeu d'évaluation (idées notées par Camille)
-  pour comparer simulation et modèle avant de s'y fier ; limiter le débit de `/api/score`.
-- Notes par évaluateur (une ligne par personne) et vue de consolidation ; rôle « lecture
-  seule » pour le client.
-- Test d'intégration de la RLS contre une base Supabase locale (`supabase start`).
-- Comparaison côte à côte de deux doublons, et possibilité de marquer « pas un doublon ».
-- Tests d'interface (Testing Library / Playwright) sur le parcours principal.
-
-**Questions pour Camille :**
-
-1. Les 4 critères ont-ils le même poids pour Hexavia ? Y a-t-il un critère éliminatoire ?
-2. Quels sont les axes stratégiques du groupe, pour régler l'« alignement » ?
-3. Évaluez-vous seule, ou d'autres consultants notent-ils aussi (moyenne, arbitrage) ?
-4. Quel format le client attend-il : CSV, PDF, ou une présentation ?
-5. Les noms des porteurs doivent-ils figurer dans la shortlist envoyée au jury ?
-6. Pour deux idées en doublon, faut-il retenir l'une, les fusionner ou réunir les porteurs ?
+**Questions :**
+1. Les 4 critères ont-ils le même poids ? Y a-t-il un critère éliminatoire ?
+2. Quels sont les axes stratégiques d'Hexavia, pour noter l'alignement ?
+3. Notez-vous seule, ou à plusieurs ?
+4. Quel format le client attend-il pour la shortlist : CSV, PDF, présentation ?
+5. Les noms des porteurs doivent-ils figurer dans ce qui est envoyé au jury ?
+6. Pour deux idées en doublon : en retenir une, les fusionner, ou réunir les porteurs ?
