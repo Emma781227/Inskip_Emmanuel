@@ -8,6 +8,8 @@ et sortir une shortlist d'environ 8 idées pour le jury.
 
 - **Application en ligne :** _à compléter après le déploiement Vercel_
 - **Dépôt :** https://github.com/Emma781227/Inskip_Emmanuel
+- **Compte de démonstration :** `inskip@gmail.com` / `Inskip237`
+  (compte dédié à l'évaluation de l'exercice, données fictives ; à désactiver après la restitution)
 
 _Captures : à ajouter depuis la version en ligne._
 
@@ -226,7 +228,10 @@ ni test d'intégration contre une vraie base.
   ignoré, seul `.env.example` est versionné. Le brief INSKIP n'est pas republié.
 - Données personnelles : noms des porteurs visibles et exportés uniquement par les comptes
   autorisés ; le fichier source n'est pas servi par l'application ; page marquée `noindex`.
-  Les identifiants du compte démonstrateur sont transmis séparément, jamais dans le dépôt.
+- **Compte de démonstration publié dans ce README** pour faciliter l'évaluation : choix assumé
+  pour un exercice aux données fictives. Avec de vraies données, il ne faudrait jamais publier
+  d'identifiants : comptes nominatifs créés par l'administrateur, mot de passe transmis à part.
+  Après la restitution, désactiver ce compte (Supabase > Authentication) et le retirer de `team_members`.
 
 **Activer un vrai modèle plus tard** (aucun code à écrire) :
 
