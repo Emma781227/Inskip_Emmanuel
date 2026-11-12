@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Idea } from '../src/domain/types';
 
-/** Export Hexavia tel que fourni (copie à l'identique dans public/data). */
-export const HEXAVIA_CSV = readFileSync(fileURLToPath(new URL('../public/data/idees_hexavia.csv', import.meta.url)), 'utf8');
+/** Export Hexavia tel que fourni (copie à l'identique dans data/, non servie par l'application). */
+export const HEXAVIA_CSV = readFileSync(fileURLToPath(new URL('../data/idees_hexavia.csv', import.meta.url)), 'utf8');
 
 export function makeIdea(overrides: Partial<Idea> = {}): Idea {
   return {

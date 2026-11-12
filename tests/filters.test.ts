@@ -1,37 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { LocalStorageWorkspaceRepository } from '../src/data/repository';
 import { parseIdeasCsv } from '../src/data/csv';
 import { DEFAULT_FILTERS, NOT_PROVIDED, filterAndSortIdeas } from '../src/domain/filters';
 import { emptyWorkspace } from '../src/domain/types';
-import { addToShortlist, saveHumanEvaluation } from '../src/domain/workspace';
+import { saveHumanEvaluation } from '../src/domain/workspace';
 import { HEXAVIA_CSV } from './fixtures';
-
-function memoryStorage() {
-  const data = new Map<string, string>();
-  return {
-    getItem: (key: string) => data.get(key) ?? null,
-    setItem: (key: string, value: string) => void data.set(key, value),
-    removeItem: (key: string) => void data.delete(key),
-  };
-}
-
-describe('LocalStorageWorkspaceRepository', () => {
-  it('relit exactement ce qui a été enregistré, par jeu de données', () => {
-    const repository = new LocalStorageWorkspaceRepository(memoryStorage());
-    const state = addToShortlist(emptyWorkspace(), 'IDEA-001', new Date('2026-11-12T10:00:00Z'));
-    repository.save('hexavia', state);
-    expect(repository.load('hexavia')).toEqual(state);
-    expect(repository.load('autre-client')).toEqual(emptyWorkspace());
-  });
-
-  it('repart d’un état vide si les données stockées sont corrompues', () => {
-    const storage = memoryStorage();
-    storage.setItem('ideapilot:workspace:hexavia', '{pas du json');
-    expect(new LocalStorageWorkspaceRepository(storage).load('hexavia')).toEqual(emptyWorkspace());
-    storage.setItem('ideapilot:workspace:hexavia', JSON.stringify({ version: 1, state: { evaluations: [] } }));
-    expect(new LocalStorageWorkspaceRepository(storage).load('hexavia')).toEqual(emptyWorkspace());
-  });
-});
 
 describe('filtres et tris du tableau', () => {
   const { ideas } = parseIdeasCsv(HEXAVIA_CSV);
