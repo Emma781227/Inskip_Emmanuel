@@ -1,81 +1,121 @@
 /**
- * Persistance de l'état de travail (suggestions IA, évaluations, shortlist).
- * L'application ne connaît que l'interface `WorkspaceRepository` : la V1 stocke dans
- * le navigateur (localStorage) ; une implémentation Supabase pourra la remplacer.
+ * Persistance IdeaPilot. L'application ne dépend que de l'interface `IdeaPilotRepository` ;
+ * l'implémentation est Supabase (Postgres + RLS). La logique métier reste dans src/domain.
  */
-import { emptyWorkspace, type WorkspaceState } from '../domain/types';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { AiSuggestion, HumanEvaluation, Idea, ScoreCriteria, ShortlistSelection, WorkspaceState } from '../domain/types';
+import type { Database } from './database.types';
+import {
+  evaluationToRow,
+  prepareIdeaImport,
+  rowToEvaluation,
+  rowToIdea,
+  rowToShortlist,
+  rowToSuggestion,
+  suggestionToRow,
+} from './mappers';
 
-export interface WorkspaceRepository {
-  load(datasetId: string): WorkspaceState;
-  save(datasetId: string, state: WorkspaceState): void;
-  clear(datasetId: string): void;
+export interface IdeaPilotData {
+  ideas: Idea[];
+  workspace: WorkspaceState;
 }
 
-const SCHEMA_VERSION = 1;
-const KEY_PREFIX = 'ideapilot:workspace:';
-
-interface StoredWorkspace {
-  version: number;
-  state: WorkspaceState;
+export interface IdeaPilotRepository {
+  loadAll(): Promise<IdeaPilotData>;
+  /** Import idempotent : upsert sur l'identifiant métier, ne touche jamais aux évaluations. */
+  importIdeas(ideas: Idea[]): Promise<number>;
+  saveAiSuggestions(suggestions: AiSuggestion[]): Promise<void>;
+  saveEvaluation(ideaId: string, scores: ScoreCriteria, comment: string): Promise<HumanEvaluation>;
+  deleteEvaluation(ideaId: string): Promise<void>;
+  addToShortlist(ideaId: string): Promise<ShortlistSelection>;
+  removeFromShortlist(ideaId: string): Promise<void>;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+/** Erreur lisible par Camille ; le détail technique reste dans la console. */
+export class RepositoryError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = 'RepositoryError';
+  }
 }
 
-/** Vérification minimale de forme, pour ne pas planter sur des données corrompues. */
-function isWorkspaceState(value: unknown): value is WorkspaceState {
-  return isRecord(value) && isRecord(value.aiSuggestions) && isRecord(value.evaluations) && isRecord(value.shortlist);
+function fail(action: string, error: { message: string; code?: string } | null): never {
+  console.error(`[IdeaPilot] ${action}`, error);
+  const denied = error?.code === '42501' || /row-level security|permission denied/i.test(error?.message ?? '');
+  throw new RepositoryError(
+    denied
+      ? `${action} : accès refusé. Votre compte n'est peut-être pas autorisé à utiliser IdeaPilot.`
+      : `${action} : le serveur n'a pas répondu correctement. Réessayez dans un instant.`,
+    error,
+  );
 }
 
-export class LocalStorageWorkspaceRepository implements WorkspaceRepository {
-  constructor(private readonly storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>) {}
+const IMPORT_BATCH_SIZE = 200;
 
-  load(datasetId: string): WorkspaceState {
-    try {
-      const raw = this.storage.getItem(KEY_PREFIX + datasetId);
-      if (!raw) return emptyWorkspace();
-      const parsed: unknown = JSON.parse(raw);
-      if (isRecord(parsed) && parsed.version === SCHEMA_VERSION && isWorkspaceState(parsed.state)) {
-        return parsed.state;
-      }
-    } catch {
-      // Stockage indisponible ou JSON corrompu : on repart d'un état vide.
+export class SupabaseRepository implements IdeaPilotRepository {
+  constructor(private readonly db: SupabaseClient<Database>) {}
+
+  async loadAll(): Promise<IdeaPilotData> {
+    const [ideas, suggestions, evaluations, shortlist] = await Promise.all([
+      this.db.from('ideas').select('*').order('id'),
+      this.db.from('ai_suggestions').select('*'),
+      this.db.from('evaluations').select('*'),
+      this.db.from('shortlist').select('*'),
+    ]);
+    if (ideas.error) fail('Chargement des idées', ideas.error);
+    if (suggestions.error) fail('Chargement des propositions IA', suggestions.error);
+    if (evaluations.error) fail('Chargement des évaluations', evaluations.error);
+    if (shortlist.error) fail('Chargement de la shortlist', shortlist.error);
+
+    const workspace: WorkspaceState = { aiSuggestions: {}, evaluations: {}, shortlist: {} };
+    for (const row of suggestions.data) workspace.aiSuggestions[row.idea_id] = rowToSuggestion(row);
+    for (const row of evaluations.data) workspace.evaluations[row.idea_id] = rowToEvaluation(row);
+    for (const row of shortlist.data) workspace.shortlist[row.idea_id] = rowToShortlist(row);
+    return { ideas: ideas.data.map(rowToIdea), workspace };
+  }
+
+  async importIdeas(ideas: Idea[]): Promise<number> {
+    const rows = prepareIdeaImport(ideas);
+    for (let start = 0; start < rows.length; start += IMPORT_BATCH_SIZE) {
+      const { error } = await this.db.from('ideas').upsert(rows.slice(start, start + IMPORT_BATCH_SIZE), { onConflict: 'id' });
+      if (error) fail('Import des idées', error);
     }
-    return emptyWorkspace();
+    return rows.length;
   }
 
-  save(datasetId: string, state: WorkspaceState): void {
-    const payload: StoredWorkspace = { version: SCHEMA_VERSION, state };
-    this.storage.setItem(KEY_PREFIX + datasetId, JSON.stringify(payload));
+  async saveAiSuggestions(suggestions: AiSuggestion[]): Promise<void> {
+    if (suggestions.length === 0) return;
+    const { error } = await this.db.from('ai_suggestions').upsert(suggestions.map(suggestionToRow), { onConflict: 'idea_id' });
+    if (error) fail('Enregistrement des propositions IA', error);
   }
 
-  clear(datasetId: string): void {
-    this.storage.removeItem(KEY_PREFIX + datasetId);
+  async saveEvaluation(ideaId: string, scores: ScoreCriteria, comment: string): Promise<HumanEvaluation> {
+    const { data, error } = await this.db
+      .from('evaluations')
+      .upsert(evaluationToRow(ideaId, scores, comment), { onConflict: 'idea_id' })
+      .select()
+      .single();
+    if (error) fail('Enregistrement de l’évaluation', error);
+    return rowToEvaluation(data);
   }
-}
 
-/** Repli en mémoire (navigation privée, stockage bloqué) : rien n'est conservé au rechargement. */
-export class InMemoryWorkspaceRepository implements WorkspaceRepository {
-  private readonly data = new Map<string, WorkspaceState>();
-  load(datasetId: string): WorkspaceState {
-    return this.data.get(datasetId) ?? emptyWorkspace();
+  async deleteEvaluation(ideaId: string): Promise<void> {
+    const { error } = await this.db.from('evaluations').delete().eq('idea_id', ideaId);
+    if (error) fail('Suppression de l’évaluation', error);
   }
-  save(datasetId: string, state: WorkspaceState): void {
-    this.data.set(datasetId, state);
-  }
-  clear(datasetId: string): void {
-    this.data.delete(datasetId);
-  }
-}
 
-export function createBrowserRepository(): { repository: WorkspaceRepository; persistent: boolean } {
-  try {
-    const probe = '__ideapilot_probe__';
-    window.localStorage.setItem(probe, '1');
-    window.localStorage.removeItem(probe);
-    return { repository: new LocalStorageWorkspaceRepository(window.localStorage), persistent: true };
-  } catch {
-    return { repository: new InMemoryWorkspaceRepository(), persistent: false };
+  async addToShortlist(ideaId: string): Promise<ShortlistSelection> {
+    const { data, error } = await this.db
+      .from('shortlist')
+      .upsert({ idea_id: ideaId }, { onConflict: 'idea_id', ignoreDuplicates: false })
+      .select()
+      .single();
+    if (error) fail('Ajout à la shortlist', error);
+    return rowToShortlist(data);
+  }
+
+  async removeFromShortlist(ideaId: string): Promise<void> {
+    const { error } = await this.db.from('shortlist').delete().eq('idea_id', ideaId);
+    if (error) fail('Retrait de la shortlist', error);
   }
 }

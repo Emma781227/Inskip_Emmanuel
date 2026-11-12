@@ -12,6 +12,7 @@
   },
   "type": "module",
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
     "lucide-react": "^1.72.0",
     "papaparse": "^5.7.1",
     "react": "^19.3.1",
