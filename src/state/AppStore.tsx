@@ -5,7 +5,8 @@
  * du serveur, pour ne jamais afficher comme enregistrée une note qui ne l'est pas.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { createAiProvider } from '../ai/config';
+import { AiProviderError } from '../ai/HttpAiScoringProvider';
+import { createAiProvider, resolveAiProviderName } from '../ai/config';
 import { CsvImportError, parseIdeasCsv } from '../data/csv';
 import { RepositoryError, SupabaseRepository, type IdeaPilotRepository } from '../data/repository';
 import { supabase } from '../data/supabaseClient';
@@ -61,7 +62,7 @@ interface AppStore {
 const StoreContext = createContext<AppStore | null>(null);
 
 function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof RepositoryError || error instanceof CsvImportError) return error.message;
+  if (error instanceof RepositoryError || error instanceof CsvImportError || error instanceof AiProviderError) return error.message;
   return fallback;
 }
 
@@ -74,7 +75,11 @@ function withItem<T>(set: ReadonlySet<T>, item: T, present: boolean): ReadonlySe
 
 export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [repository] = useState<IdeaPilotRepository | null>(() => (supabase ? new SupabaseRepository(supabase) : null));
-  const [aiProvider] = useState(() => createAiProvider());
+  const [aiProvider] = useState(() =>
+    createAiProvider(resolveAiProviderName(import.meta.env.VITE_AI_PROVIDER), {
+      getAccessToken: async () => (await supabase?.auth.getSession())?.data.session?.access_token ?? null,
+    }),
+  );
   const [auth, setAuth] = useState<AuthState>({ status: 'checking' });
   const [load, setLoad] = useState<LoadState>({ status: 'idle' });
   const [ideas, setIdeas] = useState<Idea[]>([]);

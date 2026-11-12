@@ -1,29 +1,35 @@
 /**
- * Choix du fournisseur de notation.
- *
- * V1 : seule la simulation est disponible (le brief interdit les vraies clés API).
- * Pour brancher un vrai modèle plus tard :
- *  1. créer une fonction serveur (ex. `api/score.ts` sur Vercel) qui lit `AI_API_KEY`
- *     dans les variables d'environnement serveur et appelle le modèle ;
- *  2. implémenter un `HttpAiScoringProvider` qui appelle cette route ;
- *  3. le sélectionner ici via `VITE_AI_PROVIDER=http`.
- * La clé ne transite jamais par le navigateur : rien de secret ne doit être préfixé `VITE_`.
+ * Choix du fournisseur de notation (variable publique VITE_AI_PROVIDER) :
+ *  - "mock" (défaut) : simulation déterministe à base de règles, aucune donnée ne sort ;
+ *  - "http" : vrai modèle via la fonction serveur /api/score (api/score.ts), qui détient
+ *    la clé ANTHROPIC_API_KEY. Tant que cette clé n'est pas définie côté serveur, l'appel
+ *    échoue proprement (« IA pas encore activée ») et la saisie manuelle reste possible.
+ * Aucune clé de modèle ne transite par le navigateur : rien de secret n'est préfixé VITE_.
  */
 import type { AiScoringProvider } from './AiScoringProvider';
+import { HttpAiScoringProvider } from './HttpAiScoringProvider';
 import { MockAiScoringProvider } from './MockAiScoringProvider';
 
-export type AiProviderName = 'mock';
+export type AiProviderName = 'mock' | 'http';
 
 export function resolveAiProviderName(value: string | undefined): AiProviderName {
-  if (value && value !== 'mock') {
-    console.warn(`Fournisseur IA « ${value} » non disponible en V1 : utilisation de la simulation.`);
-  }
+  const name = value?.trim().toLowerCase();
+  if (!name || name === 'mock') return 'mock';
+  if (name === 'http') return 'http';
+  console.warn(`Fournisseur IA « ${value} » inconnu : utilisation de la simulation.`);
   return 'mock';
 }
 
-export function createAiProvider(name: AiProviderName = resolveAiProviderName(import.meta.env.VITE_AI_PROVIDER)): AiScoringProvider {
+export interface AiProviderDeps {
+  /** Jeton de session de l'utilisateur connecté (requis pour le fournisseur http). */
+  getAccessToken: () => Promise<string | null>;
+}
+
+export function createAiProvider(name: AiProviderName, deps: AiProviderDeps): AiScoringProvider {
   switch (name) {
     case 'mock':
       return new MockAiScoringProvider(350);
+    case 'http':
+      return new HttpAiScoringProvider({ getAccessToken: deps.getAccessToken });
   }
 }

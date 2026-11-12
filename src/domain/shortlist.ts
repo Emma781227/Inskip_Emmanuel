@@ -63,7 +63,8 @@ export function shortlistToCsv(rows: ShortlistRow[]): string {
     for (const key of CRITERIA) record[CRITERION_LABELS[key]] = scores ? String(scores[key]) : '';
     record['Score final (/5)'] = formatNumber(scores ? averageScore(scores) : null);
     record['Commentaire de la consultante'] = row.evaluation?.comment ?? '';
-    record['Synthèse IA (simulation)'] = row.aiSuggestion?.summary ?? '';
+    record['Synthèse IA'] = row.aiSuggestion?.summary ?? '';
+    record['Source de la proposition IA'] = row.aiSuggestion ? (row.aiSuggestion.simulated ? 'Simulation (règles)' : row.aiSuggestion.provider) : '';
     return record;
   });
   return '﻿' + Papa.unparse(data, { delimiter: ';', newline: '\r\n' });

@@ -242,7 +242,7 @@ function EvaluationPanel({
   evaluation: HumanEvaluation | undefined;
   suggestion: AiSuggestion | undefined;
 }) {
-  const { saveEvaluation, deleteEvaluation, generateAiSuggestion, aiPending, aiProviderLabel } = useAppStore();
+  const { saveEvaluation, deleteEvaluation, generateAiSuggestion, aiPending } = useAppStore();
   const [draft, setDraft] = useState<Draft>(() => (evaluation ? { ...evaluation.scores } : {}));
   const [comment, setComment] = useState(evaluation?.comment ?? '');
   const [showErrors, setShowErrors] = useState(false);
@@ -288,8 +288,17 @@ function EvaluationPanel({
       {suggestion ? (
         <div className="mb-5 space-y-3">
           <Notice title={suggestion.summary}>
-            Proposition de la <strong>{aiProviderLabel.toLowerCase()}</strong>, générée le {formatDateTime(suggestion.generatedAt)}. Ce n'est pas l'analyse
-            d'un modèle de langage : vérifiez et corrigez chaque note.
+            {suggestion.simulated ? (
+              <>
+                Proposition de la <strong>simulation (règles déterministes)</strong>, générée le {formatDateTime(suggestion.generatedAt)}. Ce n'est pas
+                l'analyse d'un modèle de langage : vérifiez et corrigez chaque note.
+              </>
+            ) : (
+              <>
+                Proposition d'un <strong>modèle de langage</strong> ({suggestion.provider}), générée le {formatDateTime(suggestion.generatedAt)}. Le
+                modèle peut se tromper : vérifiez et corrigez chaque note.
+              </>
+            )}
           </Notice>
           {suggestion.warnings.length > 0 && (
             <Notice tone="warning" title="Informations insuffisantes">

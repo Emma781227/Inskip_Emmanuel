@@ -5,7 +5,7 @@ import {
   type Score,
   type ScoreCriteria,
   type WorkspaceState,
-} from './types';
+} from './types.js';
 
 export const MIN_SCORE = 1;
 export const MAX_SCORE = 5;

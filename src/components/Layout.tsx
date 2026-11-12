@@ -24,7 +24,7 @@ function NavItem({ to, label, icon: Icon, badge }: { to: string; label: string; 
 }
 
 export function Layout() {
-  const { workspace, auth, signOut, savingCount, toasts, dismissToast } = useAppStore();
+  const { workspace, auth, signOut, savingCount, toasts, dismissToast, aiProviderLabel } = useAppStore();
   const email = auth.status === 'signed-in' ? auth.email : '';
   const shortlistCount = Object.keys(workspace.shortlist).length;
 
@@ -75,7 +75,7 @@ export function Layout() {
       <footer className="no-print border-t border-slate-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 py-3 text-xs text-slate-500 sm:px-6">
           Évaluations enregistrées automatiquement dans la base de l'équipe (accès réservé aux comptes autorisés).
-          Les notes « IA » sont une simulation à base de règles, à valider par la consultante.
+          {aiProviderLabel.startsWith("Simulation") ? "Les notes « IA » sont une simulation à base de règles" : "Les notes « IA » sont proposées par un modèle de langage"}, à valider par la consultante.
         </div>
       </footer>
 
