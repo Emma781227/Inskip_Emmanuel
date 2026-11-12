@@ -22,9 +22,12 @@ cp .env.example .env.local   # URL et clé publique d'un projet Supabase
 npm run dev                  # http://localhost:5173
 ```
 
-Pour une nouvelle base, il faut aussi exécuter la migration `supabase/migrations/`, créer un compte,
-l'autoriser, puis importer `data/idees_hexavia.csv` depuis l'application (environ 3 minutes,
-étapes dans [docs/details.md](docs/details.md#installation-complète-nouvelle-base-supabase)).
+Pour une nouvelle base Supabase (une seule fois, environ 3 minutes) :
+1. SQL Editor : exécuter [`supabase/migrations/20261112170000_init_ideapilot.sql`](supabase/migrations/20261112170000_init_ideapilot.sql).
+2. Authentication > Users > Add user (« Auto confirm »), puis désactiver les inscriptions publiques.
+3. Autoriser ce compte : `insert into public.team_members (user_id) select id from auth.users where email = '…';`
+4. Se connecter et importer `data/idees_hexavia.csv`. L'import est idempotent : le relancer ne crée aucun doublon.
+
 Tests : `npm test`.
 
 ## 1. Cadrage
@@ -69,8 +72,6 @@ fusion de doublons, plusieurs challenges par base.
 - **Stack**, choisie pour coller aux outils INSKIP (React, TypeScript strict, Supabase, Vercel) :
   plus Tailwind, Papa Parse pour un CSV imparfait, Vitest et GitHub Actions.
 
-Détails (schéma, sécurité, IA) : [docs/details.md](docs/details.md#conception-détaillée).
-
 ## 3. Construction avec l'IA
 
 **Assistant :** Claude Code (Claude Opus 5.5), guidé par [`AGENTS.md`](AGENTS.md) : architecture,
@@ -92,8 +93,6 @@ règles métier non négociables, sécurité et pièges déjà rencontrés.
 - **CI.** Elle a annoncé la CI réparée après une vérification locale, mais le run suivant a encore
   échoué. La vraie cause n'est apparue qu'en reproduisant l'environnement exact de la CI : npm 10 et
   npm 11 lisent différemment le même lockfile.
-
-Récit détaillé : [docs/details.md](docs/details.md#erreurs-de-lia-en-détail).
 
 ## 4. Fiabilisation
 
@@ -137,7 +136,7 @@ Vérifié aussi contre la vraie base : un visiteur non connecté ne peut rien li
 | 18:05 | Vrai modèle IA prêt à brancher (inactif sans clé) ; 103 tests |
 | 18:09–18:21 | Vérification en ligne, captures, README |
 
-Heures issues de l'historique Git ; journal détaillé dans [docs/details.md](docs/details.md#journal-complet).
+Heures issues de l’historique Git, sauf la configuration Supabase et le déploiement Vercel, faits entre deux commits.
 
 ## 7. Suite et questions pour Camille
 
