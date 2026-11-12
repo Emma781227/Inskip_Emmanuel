@@ -13,6 +13,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Même version de npm qu'en local : npm 10 et npm 11 n'interprètent pas le lockfile de la même façon.
+      - name: Aligner la version de npm
+        run: npm install -g npm@11.6.2
       - name: Installer les dépendances
         run: npm ci
       - name: Vérifier les types (TypeScript strict)
