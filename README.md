@@ -6,14 +6,27 @@ et sortir une shortlist d'environ 8 idées pour le jury.
 
 ## Aperçu
 
-- **Application en ligne :** _à compléter après le déploiement Vercel_
+- **Application en ligne :** https://inskip-emmanuel.vercel.app/
 - **Dépôt :** https://github.com/Emma781227/Inskip_Emmanuel
 - **Compte de démonstration :** `inskip@gmail.com` / `Inskip237`
   (compte dédié à l'évaluation de l'exercice, données fictives ; à désactiver après la restitution)
 
-_Captures : à ajouter depuis la version en ligne._
+La version en ligne est déjà branchée sur sa base Supabase : schéma appliqué, compte de démonstration
+autorisé, 40 idées importées. Il suffit de se connecter.
+
+### Tableau de bord
+![Tableau de bord : indicateurs, filtres (dont doublons) et liste paginée des idées](docs/Dashboard.png)
+
+### Fiche d'une idée
+![Fiche d'une idée : proposition IA justifiée critère par critère et évaluation de la consultante](docs/Idee.png)
+
+### Shortlist pour le jury
+![Shortlist : idées retenues classées par score final, export CSV et impression PDF](docs/Shortlist.png)
 
 ## Lancer l'outil
+
+Pour utiliser l'outil, la version en ligne suffit. Les étapes ci-dessous servent à le faire tourner
+en local ou à l'installer pour un autre client (nouvelle base Supabase).
 
 Prérequis : Node.js 20 ou plus, un projet Supabase (offre gratuite).
 
@@ -168,11 +181,15 @@ Une régression est aussi apparue pendant ce réglage : la troncature des mots c
 (« pannes » ≠ « panne ») et faisait disparaître la paire des compresseurs. Elle a été repérée en
 relançant la même calibration. Ces cas sont maintenant figés dans `tests/duplicates.test.ts`.
 
-**La CI rouge.** Le premier run GitHub Actions a échoué à `npm ci`. L'annotation GitHub ne
-donnait que « exit code 1 ». En rejouant `npm ci` dans un dossier vierge, on a obtenu la vraie
-cause : un lockfile désynchronisé (`Missing: @emnapi/wasi-threads`, une dépendance optionnelle
-que npm sous Windows n'avait pas enregistrée). Le lockfile a été régénéré, puis `npm ci` a été
-revérifié à blanc. Leçon retenue : un build local vert ne garantit pas `npm ci` en CI.
+**La CI rouge, deux fois.** Le premier run GitHub Actions a échoué à `npm ci` ; l'annotation
+GitHub ne donnait que « exit code 1 ». En rejouant `npm ci` dans un dossier vierge, l'IA a trouvé
+un lockfile désynchronisé et l'a régénéré. Elle a annoncé le problème réglé après une vérification
+locale… et le run suivant a de nouveau échoué. La vraie cause n'est apparue qu'en reproduisant
+**l'environnement exact de la CI** (`npx npm@10 ci --os=linux`) : npm 10, fourni avec Node 22 en CI,
+et npm 11, utilisé en local, ne lisent pas le lockfile de la même façon (`Missing: @emnapi/core`).
+Correctif : la CI installe npm 11.6.2 avant `npm ci` ; run vert ensuite. Au passage, une tentative
+de « réparer » le lockfile avec `npm install --package-lock-only` l'avait abîmé : elle a été annulée
+avant commit. Leçon retenue : vérifier dans les conditions de la CI, pas seulement « à blanc » en local.
 
 Autres corrections : Tailwind v4 refusait `@apply` sur des classes maison (build cassé, classes
 passées en `@utility`) ; deux tests faux ont été réécrits (l'un supposait un mot absent des
@@ -214,9 +231,17 @@ TypeScript, tests, build de production.
 
 **Vérifications manuelles.** Sur la version précédente (stockage local), dans Chrome :
 pré-notation, validation, persistance après rechargement, shortlist, filtres, aucune erreur
-console, pas de débordement horizontal à 390 px. Sur la version Supabase, seul l'écran
-« Configuration requise » est vérifié à ce stade. Il n'y a ni test automatisé de l'interface,
-ni test d'intégration contre une vraie base.
+console, pas de débordement horizontal à 390 px. Sur la version Supabase :
+
+- **Sécurité, contre la vraie base :** sans connexion, lecture et écriture refusées sur les
+  5 tables (`permission denied`, HTTP 401) ;
+- **parcours connecté** (fait à la main, visible sur les captures) : import des
+  40 idées, pré-notation, évaluation et shortlist enregistrées (« Tout est enregistré ») ;
+- **version en ligne :** routes directes (`/shortlist`, `/idees/IDEA-001`) servies, `/api/score`
+  répond 405 en GET et 503 `not_configured` en POST, CSV source non servi, aucun nom d'auteur
+  dans le code publié.
+
+Il n'y a ni test automatisé de l'interface, ni test d'intégration automatisé contre une vraie base.
 
 ## 5. Livraison
 
@@ -250,7 +275,7 @@ client (données internes Hexavia), même sans les noms des auteurs.
   ajouter une table `challenges`).
 - Si deux personnes notent la même idée en même temps, la dernière sauvegarde l'emporte.
 - Le dépôt GitHub public contient le CSV fictif (noms inventés) : à retirer pour de vraies données.
-- Le bundle JS fait environ 565 Ko (avertissement Vite, surtout dû à supabase-js) ; aucune gêne
+- Le bundle JS fait environ 570 Ko (avertissement Vite, surtout dû à supabase-js) ; aucune gêne
   constatée, mais un découpage serait possible.
 
 ## 6. Journal
@@ -268,9 +293,16 @@ Heures réelles (heure locale, 12/11/2026, d'après l'historique Git) :
 | 16:47 | Libellés IA et filtres mobiles affinés après revue visuelle |
 | 16:49 | README ; push sur GitHub ; premier run CI **en échec** (`npm ci`) |
 | 16:52 | Décision : passer la persistance sur Supabase (Auth + RLS) |
-| 16:52–17:05 | Cause de l'échec CI reproduite et corrigée (lockfile) ; migration SQL, client typé, connexion, états de sauvegarde ; 79 tests |
+| 16:52–17:05 | Échec CI : première correction (lockfile), insuffisante ; migration SQL, client typé, connexion, états de sauvegarde ; 79 tests |
 | 17:05 | Trois commits Supabase (schéma et configuration, interface, tests) |
-| _à venir_ | Projet Supabase configuré, déploiement Vercel, vérification en ligne, captures |
+| entre 17:07 et 17:29 | Projet Supabase créé, migration appliquée, compte autorisé ; refus d’accès anonyme vérifié ; import des 40 idées (hors Git, heure non tracée) |
+| 17:29 | CI de nouveau en échec, vraie cause trouvée (npm 10 vs 11) : CI enfin verte |
+| 17:34 | Pagination (15 idées par page) et filtre des doublons, demandés en cours de route |
+| entre 17:34 et 17:48 | Déploiement Vercel ; variables Supabase ajoutées puis redéploiement (hors Git) |
+| 17:48 | AGENTS.md / CLAUDE.md mis à jour (Supabase, pièges rencontrés) |
+| 18:05 | Branchement d'un vrai modèle IA préparé (route serveur, inactive sans clé) ; 103 tests |
+| 18:09 | Compte de démonstration ajouté au README |
+| 18:21 | Vérification de la version en ligne, captures, README finalisé |
 
 ## 7. Suite et questions pour Camille
 
