@@ -50,6 +50,7 @@ export function simulateSuggestion(idea: Idea, now: Date = new Date()): AiSugges
   const warnings: string[] = [];
   if (idea.description.length < SHORT_DESCRIPTION) warnings.push('Description très courte : peu d’éléments pour juger.');
   if (!idea.expectedBenefits) warnings.push('Bénéfices attendus non renseignés.');
+  else if (idea.expectedBenefits.length < 20) warnings.push('Bénéfices attendus trop vagues.');
   if (idea.budgetEstimateEur === null) warnings.push('Budget absent ou non chiffré.');
   if (!idea.theme) warnings.push('Thème non renseigné.');
   if (/\b(the|and|of|with)\b/.test(text)) warnings.push('Idée rédigée en anglais : vérifier la compréhension.');
@@ -73,7 +74,9 @@ export function simulateSuggestion(idea: Idea, now: Date = new Date()): AiSugges
   const budget = idea.budgetEstimateEur;
   if (budget === null) {
     feasibility = 3;
-    feasibilityReason = `Budget non chiffré (« ${idea.budgetRaw || 'vide'} ») : note neutre par défaut.`;
+    feasibilityReason = idea.budgetRaw
+      ? `Budget « ${idea.budgetRaw} » non chiffrable : note neutre par défaut.`
+      : 'Budget non renseigné : note neutre par défaut.';
   } else {
     feasibility = budget <= 10_000 ? 5 : budget <= 50_000 ? 4 : budget <= 150_000 ? 3 : budget <= 300_000 ? 2 : 1;
     feasibilityReason = `Budget estimé à ${euros(budget)} par l'auteur.`;
