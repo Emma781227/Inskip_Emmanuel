@@ -1,9 +1,61 @@
 import { describe, expect, it } from 'vitest';
 import { parseIdeasCsv } from '../src/data/csv';
-import { DEFAULT_FILTERS, NOT_PROVIDED, filterAndSortIdeas } from '../src/domain/filters';
+import { findDuplicatePairs, indexDuplicates } from '../src/domain/duplicates';
+import { DEFAULT_FILTERS, NOT_PROVIDED, PAGE_SIZE, filterAndSortIdeas, paginate } from '../src/domain/filters';
 import { emptyWorkspace } from '../src/domain/types';
 import { saveHumanEvaluation } from '../src/domain/workspace';
 import { HEXAVIA_CSV } from './fixtures';
+
+describe('pagination', () => {
+  const items = Array.from({ length: 40 }, (_, i) => i + 1);
+
+  it('affiche 15 idées par page : 40 idées = 3 pages (15, 15, 10)', () => {
+    expect(PAGE_SIZE).toBe(15);
+    expect(paginate(items, 1)).toMatchObject({ page: 1, pageCount: 3, from: 1, to: 15, total: 40 });
+    expect(paginate(items, 2).items).toEqual(items.slice(15, 30));
+    expect(paginate(items, 3)).toMatchObject({ from: 31, to: 40 });
+    expect(paginate(items, 3).items).toHaveLength(10);
+  });
+
+  it('ramène une page hors bornes ou invalide dans les limites', () => {
+    expect(paginate(items, 99).page).toBe(3);
+    expect(paginate(items, 0).page).toBe(1);
+    expect(paginate(items, Number('abc')).page).toBe(1);
+    expect(paginate(items, 2.7).page).toBe(2);
+  });
+
+  it('gère une liste vide et une liste plus courte qu’une page', () => {
+    expect(paginate([], 1)).toEqual({ items: [], page: 1, pageCount: 1, from: 0, to: 0, total: 0 });
+    expect(paginate([1, 2, 3], 1)).toMatchObject({ pageCount: 1, from: 1, to: 3 });
+  });
+
+  it('passe à l’échelle : 1 000 idées = 67 pages', () => {
+    const many = Array.from({ length: 1000 }, (_, i) => i);
+    expect(paginate(many, 67)).toMatchObject({ pageCount: 67, from: 991, to: 1000 });
+  });
+});
+
+describe('filtre des doublons', () => {
+  const { ideas } = parseIdeasCsv(HEXAVIA_CSV);
+  const index = indexDuplicates(findDuplicatePairs(ideas));
+  const hasDuplicates = (id: string) => (index.get(id)?.length ?? 0) > 0;
+
+  it('ne garde que les idées ayant un doublon potentiel', () => {
+    const ids = filterAndSortIdeas(ideas, emptyWorkspace(), { ...DEFAULT_FILTERS, duplicates: 'with' }, hasDuplicates).map((idea) => idea.id);
+    expect(ids).toEqual(['IDEA-001', 'IDEA-002', 'IDEA-003', 'IDEA-007', 'IDEA-008', 'IDEA-014', 'IDEA-019', 'IDEA-027']);
+  });
+
+  it('« sans doublon » donne le complément exact', () => {
+    const without = filterAndSortIdeas(ideas, emptyWorkspace(), { ...DEFAULT_FILTERS, duplicates: 'without' }, hasDuplicates);
+    expect(without).toHaveLength(32);
+    expect(without.some((idea) => hasDuplicates(idea.id))).toBe(false);
+  });
+
+  it('se combine avec les autres filtres', () => {
+    const ids = filterAndSortIdeas(ideas, emptyWorkspace(), { ...DEFAULT_FILTERS, duplicates: 'with', direction: 'RH' }, hasDuplicates).map((idea) => idea.id);
+    expect(ids).toEqual(['IDEA-003', 'IDEA-019']);
+  });
+});
 
 describe('filtres et tris du tableau', () => {
   const { ideas } = parseIdeasCsv(HEXAVIA_CSV);
