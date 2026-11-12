@@ -58,7 +58,11 @@ export function simulateSuggestion(idea: Idea, now: Date = new Date()): AiSugges
   // Impact : gains chiffrés et effets sur la production, les coûts, la sécurité ou les clients.
   const impactHits = countMatches(text, IMPACT_KEYWORDS);
   let impact = 2 + Math.min(2, impactHits);
-  const impactReasons: string[] = [`${impactHits} indicateur(s) d'impact repéré(s) dans le texte`];
+  const impactReasons: string[] = [
+    impactHits === 0
+      ? "aucun effet explicite sur la production, les coûts, la sécurité ou les clients"
+      : `${impactHits} effet${impactHits > 1 ? 's' : ''} sur l'activité repéré${impactHits > 1 ? 's' : ''} (production, coûts, sécurité, clients…)`,
+  ];
   if (isQuantified(idea.expectedBenefits) || isQuantified(idea.description)) {
     impact += 1;
     impactReasons.push('gains ou constat chiffrés');
@@ -103,7 +107,7 @@ export function simulateSuggestion(idea: Idea, now: Date = new Date()): AiSugges
   const innovation = 2 + Math.min(3, innovationHits) - Math.min(1, commonHits);
   const innovationReason =
     innovationHits > 0
-      ? `${innovationHits} marqueur(s) de nouveauté technologique ou d'usage.`
+      ? `${innovationHits} marqueur${innovationHits > 1 ? 's' : ''} de nouveauté technologique ou d'usage.`
       : 'Pas de rupture technologique identifiée dans la description.';
 
   const scores: ScoreCriteria = {

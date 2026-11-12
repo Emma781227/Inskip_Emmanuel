@@ -169,8 +169,8 @@ function Dashboard() {
       </section>
 
       <section className="card" aria-label="Liste des idées">
-        <div className="grid gap-3 border-b border-slate-200 p-4 sm:grid-cols-2 lg:grid-cols-[2fr_repeat(5,1fr)]">
-          <label className="sm:col-span-2 lg:col-span-1">
+        <div className="grid grid-cols-2 gap-3 border-b border-slate-200 p-4 sm:grid-cols-3 lg:grid-cols-[2fr_repeat(5,1fr)]">
+          <label className="col-span-2 sm:col-span-3 lg:col-span-1">
             <span className="label">Rechercher</span>
             <span className="relative block">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" aria-hidden />
